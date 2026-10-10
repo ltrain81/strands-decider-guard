@@ -1,0 +1,37 @@
+# LiteLLM proxy config: Bedrock models behind the decider PII guardrail.
+# Replace the model IDs with the ones enabled in your account/region (Bedrock console > Model access).
+#   PYTHONPATH=$(pwd) litellm --config config.example.yaml --port 4000
+# decider_guardrail.py (and guard_core.py for backend: http) must be importable, e.g. in the same directory.
+
+model_list:
+  # Claude Code sends the model name you set in ANTHROPIC_MODEL / ANTHROPIC_DEFAULT_*_MODEL.
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: bedrock/global.anthropic.claude-sonnet-4-6
+      aws_region_name: ap-northeast-2
+  - model_name: claude-haiku-4-5
+    litellm_params:
+      model: bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0
+      aws_region_name: ap-northeast-2
+  # Codex (Responses API) or any OpenAI-compatible client.
+  - model_name: gpt-oss-120b
+    litellm_params:
+      model: bedrock/openai.gpt-oss-120b-1:0
+      aws_region_name: us-west-2
+
+guardrails:
+  - guardrail_name: decider-pii
+    litellm_params:
+      guardrail: decider_guardrail.DeciderGuardrail
+      mode: pre_call
+      default_on: true                                  # every request, no opt-in needed
+      backend: lambda                                   # needs lambda:InvokeFunction (InvokePolicyArn output)
+      function_name: os.environ/DECIDER_GUARD_FUNCTION  # GuardFunctionName output of ./deploy.sh
+      region: ap-northeast-2
+      # backend: http
+      # decider_url: http://<decider private IP>:8000   # when LiteLLM runs inside the guard VPC
+      block_on_ask: true
+      fail_mode: closed
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

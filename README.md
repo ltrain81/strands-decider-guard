@@ -18,6 +18,10 @@ Claude Code / Kiro CLI / Codex CLI 앞단에 [strands-decider](https://github.co
    Amazon Bedrock (Claude / Codex 모델)
 ```
 
+문서:
+- [LiteLLM 을 쓰는 고객](docs/LITELLM.md): 프록시 guardrail 로 서버 측에서 강제하는 방법
+- [데모 영상 촬영 가이드](docs/DEMO_VIDEO.md)
+
 ## 무엇을 막나
 
 | 단계 | Claude Code | Kiro CLI | Codex CLI |
@@ -61,6 +65,8 @@ client/install.sh --local
 ```
 
 ## 데모 시나리오 (`demo/`)
+
+녹화용 스크립트 재생은 `demo/run_demo.sh`, 오른쪽 판정 로그 창은 `demo/watch_audit.sh` 입니다. 촬영 방법은 [docs/DEMO_VIDEO.md](docs/DEMO_VIDEO.md) 를 보세요.
 
 ```bash
 cd demo && claude
@@ -117,6 +123,7 @@ CPU 인스턴스는 `--instance-type c7i.2xlarge` 처럼 바꿀 수 있습니다
 
 - **hook 은 클라이언트 측 통제**라서 사용자가 끌 수 있습니다. 조직 강제는 Claude Code 관리형 설정(`/Library/Application Support/ClaudeCode/managed-settings.json` + `allowManagedHooksOnly`)으로 배포하세요.
 - Kiro CLI 는 프롬프트를 막을 수 없고, Codex 는 hook 실패·타임아웃 시 통과(fail-open)합니다.
+- **LiteLLM 프록시를 쓰는 고객**은 `litellm/decider_guardrail.py` 로 서버 측에서 강제할 수 있습니다. 같은 Lambda 를 호출하고, tool result(읽은 파일 내용)까지 검사합니다. 자세한 내용은 [docs/LITELLM.md](docs/LITELLM.md).
 - Claude Code 의 Grep 결과나 `@파일` 참조처럼 hook 이 보지 못하는 경로가 있습니다. 서버 측 백스톱으로 **Bedrock Guardrails** 를 함께 쓰는 것을 권장합니다. 가드레일 버전을 만든 뒤 Claude Code 설정에 넣습니다:
   `"env": {"ANTHROPIC_CUSTOM_HEADERS": "X-Amzn-Bedrock-GuardrailIdentifier: <id>\nX-Amzn-Bedrock-GuardrailVersion: 1"}`
 - 긴 파일은 1,500자 청크 최대 16개를 고르게 샘플링해서 검사합니다. 정규식은 전체(최대 256KB)를 봅니다.
@@ -132,6 +139,8 @@ guard/guard_core.py                정책 (regex + decider). Lambda 와 로컬 �
 guard/lambda_handler.py            Lambda 진입점
 client/decider_guard.py            Claude/Kiro/Codex 공용 hook
 client/install.sh                  hook 설치·제거 (configure_agents.py 가 각 설정 파일을 병합)
-demo/                              가짜 고객 데이터와 데모 파일
+litellm/                           LiteLLM 프록시용 guardrail 과 예시 config
+demo/                              가짜 고객 데이터, 녹화용 run_demo.sh, 판정 로그 뷰어 watch_audit.sh
+docs/                              LiteLLM 연동, 데모 영상 촬영 가이드
 tests/                             합성 샘플과 정책 테스트
 ```
