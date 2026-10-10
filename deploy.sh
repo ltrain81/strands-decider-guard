@@ -3,16 +3,18 @@
 # wait until the model is loaded, smoke-test it, and optionally install the agent hooks locally.
 #
 #   ./deploy.sh [--profile P] [--region R] [--instance-type g6.xlarge] [-y]
+#               [--admin-email you@example.com]   (creates a console login; Cognito emails a temporary password)
 #               [--install-client [--agents claude,kiro,codex] [--claude-bedrock [--bedrock-region R]] [--fail-open]]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-PROFILE="" REGION="" IT="" YES="" INSTALL="" CLIENT_ARGS=()
+PROFILE="" REGION="" IT="" YES="" INSTALL="" ADMIN_EMAIL="" CLIENT_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --profile) PROFILE="$2"; shift ;;
     --region) REGION="$2"; shift ;;
     --instance-type) IT="$2"; shift ;;
+    --admin-email) ADMIN_EMAIL="$2"; shift ;;
     -y|--yes) YES=1 ;;
     --install-client) INSTALL=1 ;;
     --agents|--bedrock-region) CLIENT_ARGS+=("$1" "$2"); shift ;;
@@ -37,7 +39,8 @@ Deploying the decider guard
   account   $ACCOUNT ($CALLER)
   region    $REGION
   instance  $IT  (billed per hour while running; pause it with ./ctl.sh stop)
-  creates   VPC (no NAT), EC2 + 100GB gp3, Lambda, IAM role and policy, CloudWatch log group
+  creates   VPC (no NAT), EC2 + 100GB gp3, Lambdas, IAM, CloudWatch logs,
+            policy console (S3 + CloudFront + Cognito + API Gateway)
 EOF
 if [ -z "$YES" ]; then read -r -p "Continue? [y/N] " a; [ "$a" = y ] || [ "$a" = Y ] || exit 1; fi
 
@@ -46,7 +49,13 @@ cd "$ROOT/cdk"
 if ! aws cloudformation describe-stacks --stack-name CDKToolkit >/dev/null 2>&1; then
   npx cdk bootstrap "aws://$ACCOUNT/$REGION"
 fi
-npx cdk deploy --require-approval never --outputs-file "$ROOT/outputs.json" -c instanceType="$IT"
+PIN=()
+if [ -f "$ROOT/outputs.json" ]; then  # keep the running GPU host: reuse its AMI instead of the latest DLAMI
+  IID="$(python3 -c 'import json;print(next(iter(json.load(open("'"$ROOT"'/outputs.json")).values())).get("DeciderInstanceId",""))')"
+  AMI="$(aws ec2 describe-instances --instance-ids "$IID" --query 'Reservations[0].Instances[0].ImageId' --output text 2>/dev/null || true)"
+  [ -n "$AMI" ] && [ "$AMI" != None ] && PIN=(-c amiId="$AMI")
+fi
+npx cdk deploy --require-approval never --outputs-file "$ROOT/outputs.json" -c instanceType="$IT" "${PIN[@]}"
 FN="$(python3 -c 'import json;print(next(iter(json.load(open("'"$ROOT"'/outputs.json")).values()))["GuardFunctionName"])')"
 
 invoke() {  # invoke the guard Lambda with a JSON payload, print the response
@@ -74,6 +83,12 @@ for t in "주민등록번호 900101-1234567 고객 조회" "홍길동 환자는 
   D="$(invoke "$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$t")" | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["decision"], r["results"][0]["latency_ms"], "ms")')"
   echo "  $D  <- $t"
 done
+
+out() { python3 -c 'import json,sys;print(next(iter(json.load(open("'"$ROOT"'/outputs.json")).values()))[sys.argv[1]])' "$1"; }
+if [ -n "$ADMIN_EMAIL" ]; then "$ROOT/ctl.sh" add-admin "$ADMIN_EMAIL"; fi
+echo
+echo "Policy console: $(out AdminUrl)"
+[ -z "$ADMIN_EMAIL" ] && echo "  create a login with: ./ctl.sh add-admin you@example.com"
 
 echo
 if [ -n "$INSTALL" ]; then

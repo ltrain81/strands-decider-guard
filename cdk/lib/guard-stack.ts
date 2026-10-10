@@ -5,7 +5,16 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
+import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as apigw from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { HttpUserPoolAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 
+const ROOT = path.join(__dirname, '..', '..');
 const DLAMI = '/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id';
 
 export class DeciderGuardStack extends cdk.Stack {
@@ -31,6 +40,15 @@ export class DeciderGuardStack extends cdk.Stack {
     const deciderSg = new ec2.SecurityGroup(this, 'DeciderSg', { vpc, allowAllOutbound: true, description: 'strands-decider host' });
     deciderSg.addIngressRule(lambdaSg, ec2.Port.tcp(8000), 'guard Lambda to decider');
     lambdaSg.addEgressRule(deciderSg, ec2.Port.tcp(8000), 'guard Lambda to decider');
+    // Policy reads go to S3 through a (free) gateway endpoint; the isolated subnets have no other route out.
+    vpc.addGatewayEndpoint('S3Endpoint', { service: ec2.GatewayVpcEndpointAwsService.S3, subnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }] });
+    lambdaSg.addEgressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'guard Lambda to S3 gateway endpoint');
+
+    // Versioned policy store edited by the admin console; every save is a version (history + rollback).
+    const policyBucket = new s3.Bucket(this, 'PolicyBucket', {
+      versioned: true, enforceSSL: true, blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED, removalPolicy: cdk.RemovalPolicy.DESTROY, autoDeleteObjects: true,
+    });
 
     const role = new iam.Role(this, 'DeciderRole', {
       assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
@@ -70,7 +88,10 @@ export class DeciderGuardStack extends cdk.Stack {
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       instanceType: new ec2.InstanceType(instanceType),
-      machineImage: ec2.MachineImage.fromSsmParameter(DLAMI, { os: ec2.OperatingSystemType.LINUX }),
+      // deploy.sh pins the running host's AMI (-c amiId=...) so a newer DLAMI release does not replace it on redeploy.
+      machineImage: ctx('amiId')
+        ? ec2.MachineImage.genericLinux({ [this.region]: ctx('amiId') })
+        : ec2.MachineImage.fromSsmParameter(DLAMI, { os: ec2.OperatingSystemType.LINUX }),
       securityGroup: deciderSg,
       role,
       userData,
@@ -80,6 +101,7 @@ export class DeciderGuardStack extends cdk.Stack {
     });
     cdk.Tags.of(host).add('Name', `${this.stackName}-decider`);
 
+    const guardLogs = new logs.LogGroup(this, 'GuardFnLogs', { retention: logs.RetentionDays.ONE_MONTH, removalPolicy: cdk.RemovalPolicy.DESTROY });
     const fn = new lambda.Function(this, 'GuardFn', {
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'lambda_handler.handler',
@@ -89,9 +111,10 @@ export class DeciderGuardStack extends cdk.Stack {
       securityGroups: [lambdaSg],
       timeout: cdk.Duration.seconds(60),
       memorySize: 256,
-      environment: { DECIDER_URL: `http://${host.instancePrivateIp}:8000` },
-      logGroup: new logs.LogGroup(this, 'GuardFnLogs', { retention: logs.RetentionDays.ONE_MONTH, removalPolicy: cdk.RemovalPolicy.DESTROY }),
+      environment: { DECIDER_URL: `http://${host.instancePrivateIp}:8000`, POLICY_BUCKET: policyBucket.bucketName, POLICY_KEY: 'policy.json' },
+      logGroup: guardLogs,
     });
+    policyBucket.grantRead(fn);
 
     // Attach this to the IAM users/roles your developers use for Bedrock.
     const invokePolicy = new iam.ManagedPolicy(this, 'InvokeGuardPolicy', {
@@ -99,10 +122,111 @@ export class DeciderGuardStack extends cdk.Stack {
       statements: [new iam.PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [fn.functionArn] })],
     });
 
+    this.adminConsole(fn, guardLogs, policyBucket);
+
     new cdk.CfnOutput(this, 'GuardFunctionName', { value: fn.functionName });
     new cdk.CfnOutput(this, 'GuardFunctionArn', { value: fn.functionArn });
     new cdk.CfnOutput(this, 'InvokePolicyArn', { value: invokePolicy.managedPolicyArn });
     new cdk.CfnOutput(this, 'DeciderInstanceId', { value: host.instanceId });
     new cdk.CfnOutput(this, 'Region', { value: this.region });
+  }
+
+  /** Policy console: S3 + CloudFront static site, Cognito login, HTTP API -> admin Lambda. */
+  private adminConsole(guardFn: lambda.Function, guardLogs: logs.LogGroup, policyBucket: s3.Bucket) {
+    const site = new s3.Bucket(this, 'ConsoleSite', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL, enforceSSL: true, encryption: s3.BucketEncryption.S3_MANAGED,
+      removalPolicy: cdk.RemovalPolicy.DESTROY, autoDeleteObjects: true,
+    });
+    const dist = new cloudfront.Distribution(this, 'ConsoleCdn', {
+      defaultRootObject: 'index.html',
+      defaultBehavior: {
+        origin: origins.S3BucketOrigin.withOriginAccessControl(site),
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        responseHeadersPolicy: cloudfront.ResponseHeadersPolicy.SECURITY_HEADERS,
+      },
+    });
+    const consoleUrl = `https://${dist.distributionDomainName}/`;
+
+    const pool = new cognito.UserPool(this, 'Admins', {
+      selfSignUpEnabled: false,
+      signInAliases: { email: true },
+      autoVerify: { email: true },
+      passwordPolicy: { minLength: 12, requireSymbols: false },
+      accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
+      userInvitation: {
+        emailSubject: 'PII 가드 정책 관리 콘솔 초대',
+        emailBody: `PII 가드 정책 관리 콘솔 계정이 만들어졌습니다.<br>주소: ${consoleUrl}<br>아이디: {username}<br>임시 비밀번호: {####}<br>처음 로그인할 때 새 비밀번호를 정합니다.`,
+      },
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+    const domain = pool.addDomain('Login', { cognitoDomain: { domainPrefix: `decider-guard-${this.account}` } });
+    const client = pool.addClient('Console', {
+      generateSecret: false,
+      authFlows: { userSrp: true },
+      preventUserExistenceErrors: true,
+      oAuth: { flows: { authorizationCodeGrant: true }, scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL],
+               callbackUrls: [consoleUrl], logoutUrls: [consoleUrl] },
+    });
+
+    // handler.py + guard_core.py in one asset, copied without Docker; hashed on the output so engine changes redeploy.
+    const adminCode = lambda.Code.fromAsset(path.join(ROOT, 'admin', 'api'), {
+      assetHashType: cdk.AssetHashType.OUTPUT,
+      bundling: {
+        image: cdk.DockerImage.fromRegistry('public.ecr.aws/docker/library/busybox'),
+        local: {
+          tryBundle(outDir: string) {
+            const fs = require('fs');
+            fs.copyFileSync(path.join(ROOT, 'admin', 'api', 'handler.py'), path.join(outDir, 'handler.py'));
+            fs.copyFileSync(path.join(ROOT, 'guard', 'guard_core.py'), path.join(outDir, 'guard_core.py'));
+            return true;
+          },
+        },
+      },
+    });
+    const adminFn = new lambda.Function(this, 'AdminFn', {
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'handler.handler',
+      code: adminCode,
+      timeout: cdk.Duration.seconds(29),
+      memorySize: 256,
+      environment: { POLICY_BUCKET: policyBucket.bucketName, POLICY_KEY: 'policy.json', GUARD_FUNCTION: guardFn.functionName, GUARD_LOG_GROUP: guardLogs.logGroupName },
+      logGroup: new logs.LogGroup(this, 'AdminFnLogs', { retention: logs.RetentionDays.ONE_MONTH, removalPolicy: cdk.RemovalPolicy.DESTROY }),
+    });
+    policyBucket.grantReadWrite(adminFn);
+    guardFn.grantInvoke(adminFn);
+    adminFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:StartQuery'], resources: [guardLogs.logGroupArn] }));
+    adminFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:GetQueryResults'], resources: ['*'] }));
+
+    const api = new apigw.HttpApi(this, 'AdminApi', {
+      corsPreflight: {
+        allowOrigins: [`https://${dist.distributionDomainName}`],
+        allowMethods: [apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.PUT, apigw.CorsHttpMethod.POST],
+        allowHeaders: ['authorization', 'content-type'],
+        maxAge: cdk.Duration.hours(1),
+      },
+    });
+    const authorizer = new HttpUserPoolAuthorizer('AdminAuth', pool, { userPoolClients: [client] });
+    const integration = new HttpLambdaIntegration('AdminIntegration', adminFn);
+    const routes: [string, apigw.HttpMethod][] = [
+      ['/api/policy', apigw.HttpMethod.GET], ['/api/policy', apigw.HttpMethod.PUT], ['/api/test', apigw.HttpMethod.POST],
+      ['/api/history', apigw.HttpMethod.GET], ['/api/history/{version}', apigw.HttpMethod.GET], ['/api/stats', apigw.HttpMethod.GET],
+    ];
+    for (const [p, m] of routes) api.addRoutes({ path: p, methods: [m], integration, authorizer });
+
+    new s3deploy.BucketDeployment(this, 'ConsoleFiles', {
+      destinationBucket: site,
+      distribution: dist,
+      distributionPaths: ['/*'],
+      sources: [
+        s3deploy.Source.asset(path.join(ROOT, 'admin', 'web')),
+        s3deploy.Source.jsonData('config.json', {
+          mode: 'cognito', apiBase: api.apiEndpoint, cognitoDomain: domain.baseUrl(), clientId: client.userPoolClientId, redirectUri: consoleUrl,
+        }),
+      ],
+    });
+
+    new cdk.CfnOutput(this, 'AdminUrl', { value: consoleUrl });
+    new cdk.CfnOutput(this, 'AdminUserPoolId', { value: pool.userPoolId });
+    new cdk.CfnOutput(this, 'PolicyBucketName', { value: policyBucket.bucketName });
   }
 }

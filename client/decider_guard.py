@@ -46,7 +46,13 @@ def call_guard(cfg, items, client):
     if cfg["backend"] == "local":
         sys.path.insert(0, HOME)
         import guard_core
-        return guard_core.check_many(items, cfg["decider_url"])
+        policy = None
+        try:  # written by the local admin console (admin/dev_server.py)
+            with open(os.path.join(HOME, "policy.json")) as f:
+                policy = json.load(f)
+        except FileNotFoundError:
+            pass
+        return guard_core.check_many(items, cfg["decider_url"], policy)
     payload = {"items": items, "client": client}
     try:
         import boto3
@@ -180,10 +186,10 @@ def audit(entry):
         pass
 
 
-def block_message(decision, reasons, where):
+def block_message(decision, reasons, where, custom=""):
     head = "[PII guard] 민감 정보가 감지되어 차단했습니다" if decision == "block" else "[PII guard] 민감 정보로 의심되어 확인이 필요합니다"
     lines = [f"{head} ({where})."] + [f"  - {r}" for r in reasons[:6]]
-    lines.append("  마스킹하거나 해당 데이터를 제외하고 다시 시도하세요.")
+    lines.append(f"  {custom.strip() or '마스킹하거나 해당 데이터를 제외하고 다시 시도하세요.'}")
     return "\n".join(lines)
 
 
@@ -262,7 +268,7 @@ def run_hook(agent):
     audit({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "agent": agent, "event": event, "tool": tool, "decision": decision,
            "types": sorted({f["type"] for r in verdict.get("results", []) for f in r.get("findings", [])}),
            "sources": [i["source"] for i in items], "ms": round((time.time() - t0) * 1000)})
-    return emit(agent, event, decision, block_message(decision, reasons, where))
+    return emit(agent, event, decision, block_message(decision, reasons, where, verdict.get("message", "")))
 
 
 def main():

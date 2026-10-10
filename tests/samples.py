@@ -12,6 +12,8 @@ PII = [
     "Patient Maria Garcia (DOB 03/14/1985) was diagnosed with HIV in 2021.",
     "여권번호 M12345678, 이름 JUNG HOSEOK, 생년월일 1994-02-18",
     "이 고객 정보로 환불 메일 써줘: 이름 정우성, 이메일 woosung.j@naver.com, 주문번호 A-20391",
+    "홍길동 환자는 우울증 치료 중이라 야간 연락 금지",
+    "김철수님 HIV 양성 판정, 보험 심사 보류",
 ]
 SECRET = [
     "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",

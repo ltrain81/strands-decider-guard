@@ -1,14 +1,53 @@
-"""Lambda entry point: {"items": [{"source", "text"}]} or {"text": ...} -> guard verdict; {"health": true} -> decider status.
+"""Lambda entry point.
 
-Logs only decisions, sources, finding types and sizes, never the text itself.
+  {"items": [{"source", "text"}], "client": "claude"}   -> verdict under the saved policy
+  {"items": [...], "policy": {...}, "dry_run": true}    -> verdict under a draft policy (admin console test; not logged)
+  {"health": true}                                      -> decider status
+
+The policy is read from S3 (POLICY_BUCKET/POLICY_KEY, saved by the admin console) and cached
+for 30 s; a missing policy means the defaults. Logs only decisions, sources, categories and
+sizes, never the text itself.
 """
 import json
 import logging
+import os
+import time
 
 import guard_core
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
+
+POLICY_BUCKET = os.environ.get("POLICY_BUCKET")
+POLICY_KEY = os.environ.get("POLICY_KEY", "policy.json")
+POLICY_TTL = 30
+_cache = {"at": 0.0, "policy": None}
+
+
+def current_policy():
+    if not POLICY_BUCKET:
+        return guard_core.normalize_policy(None)
+    if _cache["policy"] is not None and time.time() - _cache["at"] < POLICY_TTL:
+        return _cache["policy"]
+    import boto3
+    s3 = boto3.client("s3")
+    try:
+        policy = guard_core.normalize_policy(json.load(s3.get_object(Bucket=POLICY_BUCKET, Key=POLICY_KEY)["Body"]))
+    except s3.exceptions.NoSuchKey:
+        policy = guard_core.normalize_policy(None)
+    except Exception as e:  # keep enforcing the last good policy rather than failing open
+        log.error(json.dumps({"policy_load_error": repr(e)[:300]}))
+        policy = _cache["policy"] or guard_core.normalize_policy(None)
+    _cache.update(at=time.time(), policy=policy)
+    return policy
+
+
+def _categories(result):
+    cats = set()
+    for r in result["results"]:
+        for f in r["findings"]:
+            cats.add(f"rule:{f['name']}" if f["source"] == "rule" else f.get("category", f["type"]))
+    return ",".join(sorted(cats))
 
 
 def handler(event, context):
@@ -17,13 +56,19 @@ def handler(event, context):
             return {"ok": True, "decider": guard_core.health()}
         except Exception as e:
             return {"ok": False, "error": str(e)}
+    dry_run = bool(event.get("dry_run"))
+    policy = guard_core.normalize_policy(event["policy"]) if dry_run and "policy" in event else current_policy()
     items = event.get("items") or [{"source": event.get("source", ""), "text": event.get("text", "")}]
-    out = guard_core.check_many(items)
-    log.info(json.dumps({
-        "decision": out["decision"],
-        "client": event.get("client", ""),
-        "items": [{"source": r["source"], "decision": r["decision"], "types": sorted({f["type"] for f in r["findings"]}),
-                   "chunks": r["chunks_scanned"], "ms": r["latency_ms"]} for r in out["results"]],
-        "chars": [len(i.get("text", "")) for i in items],
-    }, ensure_ascii=False))
+    t0 = time.time()
+    out = guard_core.check_many(items, policy=policy)
+    out["policy_updated_at"] = policy.get("updated_at")
+    if not dry_run:
+        log.info(json.dumps({
+            "decision": out["decision"],
+            "client": event.get("client", ""),
+            "sources": ",".join(r["source"] for r in out["results"]),
+            "categories": _categories(out),
+            "chars": sum(len(i.get("text", "")) for i in items),
+            "ms": round((time.time() - t0) * 1000),
+        }, ensure_ascii=False))
     return out

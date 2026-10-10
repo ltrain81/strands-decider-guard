@@ -19,8 +19,22 @@ Claude Code / Kiro CLI / Codex CLI 앞단에 [strands-decider](https://github.co
 ```
 
 문서:
+- [정책 관리 콘솔](docs/ADMIN.md): 비개발자도 웹 화면에서 차단 기준, 회사 전용 규칙, 예외를 관리
 - [LiteLLM 을 쓰는 고객](docs/LITELLM.md): 프록시 guardrail 로 서버 측에서 강제하는 방법
 - [데모 영상 촬영 가이드](docs/DEMO_VIDEO.md)
+
+## 정책은 화면에서 관리
+
+규칙을 코드로 하나씩 고치는 대신, **정책 관리 콘솔**(CloudFront + Cognito 로그인)에서 정합니다. 사용법은 [docs/ADMIN.md](docs/ADMIN.md) 에 있습니다.
+
+- 정보 유형별(주민번호, 카드·계좌, 연락처, 건강정보, 비밀번호 등) 차단 / 확인 / 허용
+- 민감도: 관대 / 보통 / 엄격
+- **회사 전용 규칙을 질문 문장으로 작성**: 예) "사내 프로젝트 'Phoenix(피닉스)'의 미공개 일정이 있나요?" decider 가 그 질문으로 판단하므로 정규식이 필요 없습니다.
+- 예외 목록(회사 이메일 도메인, 테스트용 이름), 차단 안내 문구
+- 저장 전 테스트, 최근 활동(원문 없이 건수와 사유만), 변경 이력과 되돌리기
+
+저장하면 30초 안에 모든 hook 과 LiteLLM guardrail 에 적용됩니다(S3 버전 관리 + Lambda 캐시).
+AWS 없이 써 보려면 `admin/dev_server.py` 를 실행합니다. 로컬 모드 hook 과 연동됩니다.
 
 ## 무엇을 막나
 
@@ -45,7 +59,7 @@ Claude Code / Kiro CLI / Codex CLI 앞단에 [strands-decider](https://github.co
 
 ```bash
 git clone <this repo> && cd strands-decider-guard
-./deploy.sh --region ap-northeast-2 --install-client           # 배포 + 이 PC에 hook 설치 (확인 프롬프트 있음)
+./deploy.sh --region ap-northeast-2 --admin-email you@example.com --install-client   # 배포 + 콘솔 계정 + 이 PC hook
 # Claude Code 를 Bedrock 으로 쓰도록 같이 설정:  --claude-bedrock --bedrock-region us-west-2
 ```
 
@@ -89,12 +103,14 @@ cd demo && claude
 ./destroy.sh       # 스택 전체 삭제 (스택 이름 입력 확인)
 ```
 
-설정은 `~/.decider-guard/config.json`:
+탐지 기준(유형별 동작, 민감도, 회사 규칙, 예외, 안내 문구)은 정책 관리 콘솔에서 바꿉니다. `./ctl.sh console` 로 주소를 확인하고, `./ctl.sh add-admin 이메일` 로 계정을 추가합니다.
+
+클라이언트 설정은 `~/.decider-guard/config.json`:
 - `fail_mode`: `closed`(기본, guard 에 닿지 않으면 차단) / `open`.
 - `override_token`: `ask` 판정 프롬프트를 통과시키는 접두어.
 - `max_file_bytes`: 파일 검사 상한.
 
-임계값은 Lambda 환경 변수 `GUARD_CAT_CONF`, `GUARD_BLOCK_P`, `GUARD_ASK_P`, `GUARD_MAX_CHUNKS` 로 조정합니다.
+긴 텍스트 샘플링 수는 Lambda 환경 변수 `GUARD_MAX_CHUNKS` 로 조정합니다.
 
 ## 비용 (ap-northeast-2, 대략)
 
@@ -103,21 +119,30 @@ cd demo && claude
 | EC2 g6.xlarge (L4 24GB) | $0.99/시간 (상시 가동 시 월 약 $720). 데모 후 `./ctl.sh stop` 또는 `./destroy.sh` |
 | EBS gp3 100GB | 월 약 $9 (정지 중에도 과금) |
 | 퍼블릭 IPv4 | 월 약 $3.6 |
-| Lambda / CloudWatch | 데모 규모에서는 거의 0 |
+| Lambda / CloudWatch / API Gateway / CloudFront / Cognito / S3 | 데모 규모에서는 거의 0 (Cognito 는 MAU 무료 구간) |
 
 CPU 인스턴스는 `--instance-type c7i.2xlarge` 처럼 바꿀 수 있습니다. 다만 CPU 지연시간은 측정하지 않았고 GPU 보다 수 배 느릴 것으로 예상합니다.
 
 ## 정확도 (합성 데이터, 로컬 Mac MPS 측정)
 
-`tests/test_policy.py [--holdout] [decider_url]` 로 재현할 수 있습니다.
+재현:
+- `tests/test_policy.py [--holdout] [--sensitivity=strict] [decider_url]`
+- 정책 기능: `tests/test_policy_features.py`
 
-| 세트 | PII/비밀 검출 | 정상 텍스트 통과 | 비고 |
-|---|---|---|---|
-| 튜닝 세트 `tests/samples.py` (28) | 14/14 | 14/14 | 임계값을 이 세트로 정했으므로 낙관적인 수치 |
-| 홀드아웃 `tests/holdout.py` (20) | 10/10 | 9/10 | 오탐: `SELECT name, email FROM users ...` |
+| 민감도 | 튜닝 세트 `samples.py` (30) | 홀드아웃 `holdout.py` (20) |
+|---|---|---|
+| 관대 | 놓침 2 (짧은 건강 정보 문장) | 놓침 1 (운전면허번호) |
+| **보통** | 전부 맞음 | 오탐 1: `SELECT name, email ...` 이 "확인" |
+| 엄격 | 오탐 1: 마스킹 예시가 "확인" | 오탐 1: SQL 이 "확인" |
 
-- 판정 하나에 decider 호출 1회(질문 3개)가 들고, MPS 에서 중간값 약 190ms 입니다. 강한 패턴은 모델 호출 없이 1ms 이하.
-- 샘플이 수십 개뿐이라 실제 성능을 대표하지 않습니다. 고객 데이터 형태로 샘플을 늘려 다시 재 보세요.
+- 임계값은 튜닝 세트로 정했습니다.
+  - AWS 스모크 테스트에서 놓친 "홍길동 환자는 우울증 치료 중..." 문장을 보고 **"특정인을 지칭하는가"** 질문을 추가했습니다.
+  - 그 과정에서 홀드아웃의 SQL 점수도 봤기 때문에, 홀드아웃이 완전히 독립적이지는 않습니다.
+- 판정 하나에 decider 호출 1회가 듭니다(질문 4개 + 회사 규칙 수). 중간값은 MPS 약 220ms 입니다.
+  - AWS(hook → Lambda → GPU)는 Claude Code 실측 기준 hook 1회당 0.3–0.65초였습니다.
+  - 강한 패턴은 모델 호출 없이 1ms 이하입니다.
+- 회사 규칙(한국어 질문)은 10개 문장 중 9개를 맞혔습니다. 한글 표기 "피닉스" 만 쓴 문장을 놓쳤고, 그래서 다른 표기를 함께 쓰라고 안내합니다.
+- 샘플이 수십 개뿐이라 실제 성능을 대표하지 않습니다. 콘솔의 테스트 탭에서 실제 업무 문장으로 확인하세요.
 
 ## 한계 (데모로서 알고 있어야 할 것)
 
@@ -134,11 +159,14 @@ CPU 인스턴스는 `--instance-type c7i.2xlarge` 처럼 바꿀 수 있습니다
 
 ```
 deploy.sh / ctl.sh / destroy.sh   배포·운영 스크립트
-cdk/                               CDK (TypeScript): VPC, EC2 GPU host, Guard Lambda, invoke policy
-guard/guard_core.py                정책 (regex + decider). Lambda 와 로컬 모드가 같은 코드를 씀
+cdk/                               CDK (TypeScript): VPC, EC2 GPU host, Guard Lambda, 정책 S3, 콘솔(CloudFront/Cognito/API)
+guard/guard_core.py                판정 엔진 (regex + decider + 편집 가능한 정책). Lambda·콘솔·로컬 모드가 같은 코드를 씀
 guard/lambda_handler.py            Lambda 진입점
 client/decider_guard.py            Claude/Kiro/Codex 공용 hook
 client/install.sh                  hook 설치·제거 (configure_agents.py 가 각 설정 파일을 병합)
+admin/web/index.html               정책 관리 콘솔 (단일 HTML, 의존성 없음)
+admin/api/handler.py               콘솔 API (정책 저장/이력/테스트/통계)
+admin/dev_server.py                로그인 없이 로컬에서 콘솔 실행
 litellm/                           LiteLLM 프록시용 guardrail 과 예시 config
 demo/                              가짜 고객 데이터, 녹화용 run_demo.sh, 판정 로그 뷰어 watch_audit.sh
 docs/                              LiteLLM 연동, 데모 영상 촬영 가이드
