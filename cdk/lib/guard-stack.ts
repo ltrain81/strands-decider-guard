@@ -29,8 +29,8 @@ export class DeciderGuardStack extends cdk.Stack {
 
     const lambdaSg = new ec2.SecurityGroup(this, 'GuardFnSg', { vpc, allowAllOutbound: false, description: 'decider guard Lambda' });
     const deciderSg = new ec2.SecurityGroup(this, 'DeciderSg', { vpc, allowAllOutbound: true, description: 'strands-decider host' });
-    deciderSg.addIngressRule(lambdaSg, ec2.Port.tcp(8000), 'guard Lambda -> decider');
-    lambdaSg.addEgressRule(deciderSg, ec2.Port.tcp(8000), 'guard Lambda -> decider');
+    deciderSg.addIngressRule(lambdaSg, ec2.Port.tcp(8000), 'guard Lambda to decider');
+    lambdaSg.addEgressRule(deciderSg, ec2.Port.tcp(8000), 'guard Lambda to decider');
 
     const role = new iam.Role(this, 'DeciderRole', {
       assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
