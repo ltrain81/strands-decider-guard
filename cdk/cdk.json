@@ -1,0 +1,9 @@
+{
+  "app": "npx tsx bin/app.ts",
+  "context": {
+    "instanceType": "g6.xlarge",
+    "modelId": "StrandsAgents/strands-decider-2B-qwen3.5-v1-2610",
+    "deciderRef": "0ac22a97e584f3ccf87cc9b8cc5fdbad57cdf534",
+    "stackName": "DeciderGuard"
+  }
+}

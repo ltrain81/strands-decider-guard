@@ -1,0 +1,4 @@
+customer_id,name,phone,email,resident_id,address
+C-1001,김민수,010-2345-6789,minsu.kim@example.com,900101-1234567,서울시 강남구 테헤란로 123
+C-1002,이영희,010-3456-7890,younghee.lee@example.com,920315-2345678,부산시 해운대구 우동 45
+C-1003,박지훈,010-4567-8901,jihoon.park@example.com,881122-1456789,대전시 유성구 대학로 99

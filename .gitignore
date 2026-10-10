@@ -1,0 +1,7 @@
+node_modules/
+cdk.out/
+cdk/cdk.context.json
+outputs.json
+__pycache__/
+*.pyc
+.DS_Store
