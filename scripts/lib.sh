@@ -41,7 +41,7 @@ publish_console() {
   local bucket; bucket="$(out ConsoleBucketName)"
   [ -n "$bucket" ] || { warn "policy console not deployed (console=false)"; return 0; }
   local tmp; tmp="$(mktemp -d)"
-  cp "$ROOT/admin/web/index.html" "$tmp/"
+  cp -R "$ROOT/admin/web/." "$tmp/"
   python3 - "$tmp/config.json" <<EOF
 import json, sys
 json.dump({"mode": "cognito", "apiBase": "$(out ConsoleApiUrl)", "cognitoDomain": "$(out ConsoleLoginDomain)",

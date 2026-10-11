@@ -64,12 +64,13 @@ def handler(event, context):
     out = guard_core.check_many(items, policy=policy, lang=lang)
     out["policy_updated_at"] = policy.get("updated_at")
     if not dry_run:
-        log.info(json.dumps({
+        # A bare JSON line (not logging's "[INFO] ts id ..." prefix) so CloudWatch metric filters can match on fields.
+        print(json.dumps({
             "decision": out["decision"],
             "client": event.get("client", ""),
             "sources": ",".join(r["source"] for r in out["results"]),
             "categories": _categories(out),
             "chars": sum(len(i.get("text", "")) for i in items),
             "ms": round((time.time() - t0) * 1000),
-        }, ensure_ascii=False))
+        }, ensure_ascii=False), flush=True)
     return out

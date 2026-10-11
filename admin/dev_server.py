@@ -29,6 +29,7 @@ import handler  # noqa: E402  (reads the env above at import)
 
 WEB = os.path.join(ROOT, "web")
 CONFIG = json.dumps({"mode": "local", "apiBase": ""}).encode()
+TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
 
 
 class H(http.server.BaseHTTPRequestHandler):
@@ -55,9 +56,11 @@ class H(http.server.BaseHTTPRequestHandler):
             return self._api("GET")
         if path == "/config.json":
             return self._send(200, CONFIG)
-        if path in ("/", "/index.html"):
-            with open(os.path.join(WEB, "index.html"), "rb") as f:
-                return self._send(200, f.read(), "text/html; charset=utf-8")
+        name = "index.html" if path == "/" else path.lstrip("/")
+        file = os.path.realpath(os.path.join(WEB, name))
+        if file.startswith(os.path.realpath(WEB) + os.sep) and os.path.isfile(file):
+            with open(file, "rb") as f:
+                return self._send(200, f.read(), TYPES.get(os.path.splitext(file)[1], "application/octet-stream"))
         self._send(404, b"{}")
 
     def do_PUT(self):

@@ -146,8 +146,11 @@ The console has four tabs:
   Also **your own rules written as yes/no questions**, e.g. "Does the text include unreleased launch plans for project
   Phoenix (PHX)?", an allowlist (company email domains, fake test names) and the message shown when something is blocked.
 - **Test:** check sample text against unsaved settings.
-- **Activity:** counts and recent blocks. No text is ever stored.
-- **History:** every saved version, with rollback.
+- **Overview:** health of the guard, the GPU host and alerts; checks, block rate, p95 latency and errors;
+  charts of decisions and latency over time.
+- **Logs:** a searchable decision log with CSV export, and an admin activity trail of who changed what. No text is ever stored.
+- **Alerts:** email recipients and alarms for "guard down", errors, block spikes and slow checks (AWS).
+- **History:** every saved version, compare with the current one, and roll back.
 
 Saved changes reach every hook and the LiteLLM guardrail within 30 seconds; nothing is redeployed.
 Guide: [docs/ADMIN.md](docs/ADMIN.md). Local: `make local-console`. AWS: `make console`, plus `make add-admin ADMIN_EMAIL=…` to add logins.

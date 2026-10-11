@@ -20,7 +20,7 @@ use_region "$REGION"
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
 
 echo "This deletes stack ${B}$STACK${N} in $AWS_REGION (account $ACCOUNT):"
-echo "  GPU host, Lambdas, VPC, policy bucket (all saved policy versions), console, Cognito users, logs."
+echo "  GPU host, Lambdas, VPC, policy bucket (all saved policy versions), console, Cognito users, alert topic and alarms, logs."
 read -r -p "Type the stack name to confirm: " a
 [ "$a" = "$STACK" ] || { echo "aborted"; exit 1; }
 
@@ -30,6 +30,10 @@ for b in $(aws cloudformation list-stack-resources --stack-name "$STACK" \
              --query "StackResourceSummaries[?ResourceType=='AWS::S3::Bucket'].PhysicalResourceId" --output text 2>/dev/null); do
   empty_bucket "$b"
 done
+
+step "Deleting alarms created from the console"
+ALARMS="$(aws cloudwatch describe-alarms --alarm-name-prefix "$STACK-" --query 'MetricAlarms[].AlarmName' --output text 2>/dev/null || true)"
+if [ -n "$ALARMS" ]; then aws cloudwatch delete-alarms --alarm-names $ALARMS && ok "deleted: $ALARMS"; else ok "none"; fi
 
 step "Deleting stack"
 (cd "$ROOT/cdk" && npx cdk destroy --force)

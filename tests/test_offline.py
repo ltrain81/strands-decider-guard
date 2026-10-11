@@ -21,6 +21,10 @@ sys.path[:0] = [os.path.join(ROOT, "guard"), os.path.join(ROOT, "client"), os.pa
 import guard_core as g  # noqa: E402
 
 
+RRN = "-".join(["900101", "1234567"])                      # synthetic resident number
+MAIL = lambda user: "@".join([user, "example.com"])         # synthetic addresses
+
+
 def fake_answers(kind="none", p_kind=0.95, about=0.1, real=0.1, named=0.1, rules=None):
     """Decider answers shaped like the real API: kind probabilities spread over the other categories."""
     cats = ["none", "contact", "government_id", "financial", "health", "credential"]
@@ -270,12 +274,21 @@ class ConfigureAgents(unittest.TestCase):
 
 
 class AdminApi(unittest.TestCase):
+    """The console API in local mode (policy file + audit.log), plus alerts against fake AWS clients."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         os.environ.update(POLICY_FILE=os.path.join(self.tmp.name, "policy.json"), LOCAL_DECIDER_URL="http://fake",
                           AUDIT_LOG=os.path.join(self.tmp.name, "audit.log"))
-        import handler
-        self.api = importlib.reload(handler)
+        now = __import__("datetime").datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        with open(os.environ["AUDIT_LOG"], "w") as f:
+            for d, types in (("block", ["kr_resident_id"]), ("allow", []), ("ask", ["email"])):
+                f.write(json.dumps({"ts": now, "agent": "claude", "event": "PreToolUse", "tool": "Read",
+                                    "decision": d, "types": types, "sources": ["file:a.csv"], "ms": 200}) + "\n")
+        import common, monitoring, alerts, handler
+        for mod in (common, monitoring, alerts, handler):
+            importlib.reload(mod)
+        self.api, self.monitoring, self.alerts = handler, monitoring, alerts
 
     def tearDown(self):
         for k in ("POLICY_FILE", "LOCAL_DECIDER_URL", "AUDIT_LOG"):
@@ -283,23 +296,72 @@ class AdminApi(unittest.TestCase):
         self.tmp.cleanup()
 
     def call(self, method, path, body=None, lang="en", query=None):
-        r = self.api.handler({"requestContext": {"http": {"method": method}}, "rawPath": path, "headers": {"x-lang": lang},
-                              "queryStringParameters": query or {}, "body": json.dumps(body) if body is not None else ""})
+        with redirect_stdout(io.StringIO()):  # swallow the audit lines
+            r = self.api.handler({"requestContext": {"http": {"method": method}}, "rawPath": path, "headers": {"x-lang": lang},
+                                  "queryStringParameters": query or {}, "body": json.dumps(body) if body is not None else ""})
         return r["statusCode"], json.loads(r["body"])
 
     def test_policy_roundtrip_history_and_test(self):
         code, r = self.call("GET", "/api/policy")
         self.assertEqual((code, r["meta"]["categories"][0]["label"]), (200, "Resident registration number"))
         self.assertEqual(self.call("GET", "/api/policy", lang="ko")[1]["meta"]["categories"][0]["label"], "주민·외국인등록번호")
-        code, r = self.call("PUT", "/api/policy", {"policy": {"sensitivity": "strict"}})
-        self.assertEqual((code, r["policy"]["sensitivity"]), (200, "strict"))
+        self.assertEqual(self.call("PUT", "/api/policy", {"policy": {"sensitivity": "strict"}})[1]["policy"]["sensitivity"], "strict")
         self.assertEqual(self.call("PUT", "/api/policy", {"policy": {"sensitivity": "x"}})[0], 400)
-        self.assertEqual(len(self.call("GET", "/api/history")[1]["versions"]), 1)
+        self.call("PUT", "/api/policy", {"policy": {"sensitivity": "balanced", "categories": {"health": "ask"}}})
+        versions = self.call("GET", "/api/history")[1]["versions"]
+        self.assertEqual(len(versions), 2)
+        code, r = self.call("GET", f"/api/history/{versions[-1]['version_id']}")   # the first save vs the current policy
+        self.assertEqual({c["kind"] for c in r["changes"]}, {"sensitivity", "category"})
         with mock.patch.object(g, "ask_decider", FakeDecider()):
-            code, r = self.call("POST", "/api/test", {"text": "id 900101-1234567", "policy": {}})
+            code, r = self.call("POST", "/api/test", {"text": "id " + RRN, "policy": {}})
         self.assertEqual((code, r["decision"]), (200, "block"))
         self.assertEqual(self.call("POST", "/api/test", {"text": " "})[0], 400)
-        self.assertEqual(self.call("GET", "/api/stats", query={"hours": "24"})[0], 200)
+
+    def test_overview_logs_activity(self):
+        with mock.patch.object(g, "health", lambda url=None, timeout=5: {"model": "m", "device": "cpu"}):
+            code, o = self.call("GET", "/api/overview", query={"hours": "24"})
+        self.assertEqual(code, 200)
+        self.assertTrue(o["health"]["guard"]["ok"])
+        self.assertEqual((o["totals"]["checks"], o["totals"]["block"], o["totals"]["ask"]), (3, 1, 1))
+        self.assertEqual(sum(b["block"] for b in o["series"]), 1)
+        code, logs = self.call("GET", "/api/logs", query={"hours": "24", "decision": "block,ask"})
+        self.assertEqual((code, len(logs["rows"])), (200, 2))
+        self.assertEqual(len(self.call("GET", "/api/logs", query={"category": "resident_id"})[1]["rows"]), 1)
+        self.assertEqual(self.call("GET", "/api/logs", query={"q": 'x" | fields @message'})[0], 400)
+        self.assertEqual(self.call("GET", "/api/logs", query={"decision": "maybe"})[0], 400)
+        self.call("PUT", "/api/policy", {"policy": {"sensitivity": "strict"}})
+        rows = self.call("GET", "/api/activity")[1]["rows"]
+        self.assertEqual((rows[0]["action"], rows[0]["detail"][0]["kind"]), ("policy_saved", "sensitivity"))
+        self.assertEqual(self.call("GET", "/api/alerts")[1], {"available": False})
+
+    def test_policy_changes(self):
+        old = g.normalize_policy({"custom_rules": [{"id": "a", "name": "A", "question": "a?"}], "allow": {"terms": ["x"]}})
+        new = g.normalize_policy({"sensitivity": "strict", "custom_rules": [{"id": "a", "name": "A", "question": "changed?"},
+                                  {"id": "b", "name": "B", "question": "b?"}], "allow": {"terms": ["y"]}, "message": "hi"})
+        kinds = [c["kind"] for c in self.monitoring.policy_changes(old, new)]
+        self.assertEqual(kinds, ["sensitivity", "rule_changed", "rule_added", "allow_added", "allow_removed", "message"])
+
+    def test_alert_settings_and_alarms(self):
+        n = self.alerts.normalize({"emails": [MAIL("ops")], "rules": {"block_spike": {"enabled": True, "threshold": 0}}})
+        self.assertEqual((n["rules"]["block_spike"]["threshold"], n["rules"]["guard_down"]["enabled"]), (1, True))
+        for bad in ({"emails": ["not-an-email"]}, {"rules": {"nope": {}}}):
+            with self.assertRaises(ValueError):
+                self.alerts.normalize(bad)
+        fake = {"s3": mock.MagicMock(), "sns": mock.MagicMock(), "cloudwatch": mock.MagicMock()}
+        fake["s3"].exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        fake["s3"].get_object.side_effect = fake["s3"].exceptions.NoSuchKey
+        fake["sns"].list_subscriptions_by_topic.return_value = {"Subscriptions": [
+            {"Protocol": "email", "Endpoint": MAIL("old"), "SubscriptionArn": "arn:aws:sns:x:1:t:abc"}]}
+        with mock.patch.object(self.alerts, "LOCAL", False), mock.patch.object(self.alerts, "ALERTS_TOPIC", "arn:aws:sns:x:1:t"), \
+                mock.patch.object(self.alerts, "GUARD_FUNCTION", "guard"), mock.patch.object(self.alerts, "aws", lambda name: fake[name]):
+            cfg, changes = self.alerts.save({"emails": [MAIL("ops")], "rules": {"latency": {"enabled": True, "threshold_ms": 2500}}})
+        fake["sns"].subscribe.assert_called_once()
+        fake["sns"].unsubscribe.assert_called_once_with(SubscriptionArn="arn:aws:sns:x:1:t:abc")
+        alarms = {c.kwargs["AlarmName"]: c.kwargs for c in fake["cloudwatch"].put_metric_alarm.call_args_list}
+        self.assertEqual(sorted(alarms), ["DeciderGuard-guard_down", "DeciderGuard-guard_errors", "DeciderGuard-latency"])
+        self.assertEqual(alarms["DeciderGuard-latency"]["Threshold"], 2500)
+        fake["cloudwatch"].delete_alarms.assert_called_once_with(AlarmNames=["DeciderGuard-block_spike"])
+        self.assertEqual({c["kind"] for c in changes}, {"email_added", "email_removed", "rule"})
 
 
 if __name__ == "__main__":

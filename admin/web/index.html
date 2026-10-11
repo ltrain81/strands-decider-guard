@@ -3,98 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PII Guard Policy Console</title>
-<style>
-  :root {
-    color-scheme: light;
-    --bg: #f6f6f4; --surface: #fcfcfb; --surface-2: #f0efec; --line: #e2e1dc;
-    --text: #0b0b0b; --text-2: #52514e; --text-3: #7a7974;
-    --accent: #2a78d6; --accent-weak: #e6f0fc;
-    --series-1: #2a78d6;
-    --good: #0ca30c; --warning: #fab219; --critical: #d03b3b;
-    --good-bg: #e7f6e7; --warning-bg: #fef4dc; --critical-bg: #fbe9e9;
-    --radius: 10px;
-  }
-  * { box-sizing: border-box }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif }
-  header { background: var(--surface); border-bottom: 1px solid var(--line); padding: 14px 28px; display: flex; align-items: center; gap: 16px }
-  header h1 { font-size: 17px; margin: 0 }
-  header .ver { color: var(--text-3); font-size: 13px }
-  header .user { margin-left: auto; color: var(--text-2); font-size: 13px; display: flex; gap: 10px; align-items: center }
-  nav { background: var(--surface); border-bottom: 1px solid var(--line); padding: 0 20px; display: flex; gap: 4px }
-  nav button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 12px 14px; font: inherit; color: var(--text-2); cursor: pointer }
-  nav button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600 }
-  main { max-width: 980px; margin: 0 auto; padding: 24px 20px 120px }
-  section.tab { display: none } section.tab.on { display: block }
-  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; margin-bottom: 18px }
-  h2 { font-size: 16px; margin: 0 0 4px } .sub { color: var(--text-2); font-size: 13.5px; margin: 0 0 16px }
-  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px }
-  @media (max-width: 760px) { .grid3 { grid-template-columns: 1fr } }
-  .choice { border: 1.5px solid var(--line); border-radius: var(--radius); padding: 14px; cursor: pointer; background: var(--surface) }
-  .choice.on { border-color: var(--accent); background: var(--accent-weak) }
-  .choice b { display: block; margin-bottom: 4px }
-  .choice span { color: var(--text-2); font-size: 13px }
-  .cat { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line) }
-  .cat:first-of-type { border-top: 0 }
-  .cat .info { flex: 1 } .cat .info b { display: block } .cat .info span { color: var(--text-2); font-size: 13px }
-  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; flex-shrink: 0 }
-  .seg button { border: 0; background: var(--surface); padding: 7px 14px; font: inherit; font-size: 14px; cursor: pointer; color: var(--text-2); border-left: 1px solid var(--line) }
-  .seg button:first-child { border-left: 0 }
-  .seg button.on[data-v=block] { background: var(--critical-bg); color: #8c1d1d; font-weight: 600 }
-  .seg button.on[data-v=ask] { background: var(--warning-bg); color: #7a5300; font-weight: 600 }
-  .seg button.on[data-v=allow] { background: var(--good-bg); color: #0b5e0b; font-weight: 600 }
-  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--text-2); margin-bottom: 8px }
-  .rule { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; background: var(--surface) }
-  .rule.off { opacity: .55 }
-  .rule .row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px }
-  input[type=text], textarea, select { font: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: #fff; color: var(--text); width: 100% }
-  textarea { resize: vertical; min-height: 64px }
-  select { width: auto }
-  .btn { white-space: nowrap; font: inherit; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 8px 14px; cursor: pointer; color: var(--text) }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600 }
-  .btn.ghost { border-color: transparent; color: var(--text-2) }
-  .btn:disabled { opacity: .5; cursor: default }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: #fff; min-height: 42px }
-  .chip { background: var(--surface-2); border-radius: 14px; padding: 3px 6px 3px 10px; font-size: 13.5px; display: flex; align-items: center; gap: 4px }
-  .chip button { border: 0; background: none; cursor: pointer; color: var(--text-3); font-size: 15px; line-height: 1 }
-  .chips input { border: 0; flex: 1; min-width: 160px; padding: 4px; outline: none }
-  .tpl { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 14px }
-  .tpl button { font: inherit; font-size: 13px; border: 1px dashed var(--line); background: none; border-radius: 14px; padding: 4px 10px; cursor: pointer; color: var(--text-2) }
-  .hint { color: var(--text-3); font-size: 12.5px; margin-top: 6px }
-  label.f { display: block; font-size: 13px; color: var(--text-2); margin: 12px 0 4px }
-  .savebar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); padding: 12px 28px; display: none; align-items: center; gap: 12px; box-shadow: 0 -4px 16px rgba(0,0,0,.05) }
-  .savebar.on { display: flex } .savebar .msg { flex: 1; color: var(--text-2) }
-  .banner { background: var(--accent-weak); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 14px; display: none }
-  .banner.on { display: block }
-  .verdict { display: inline-flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 700; padding: 8px 16px; border-radius: 8px }
-  .verdict.block { background: var(--critical-bg); color: #8c1d1d } .verdict.ask { background: var(--warning-bg); color: #7a5300 } .verdict.allow { background: var(--good-bg); color: #0b5e0b }
-  .verdict i { font-style: normal; width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 15px }
-  .verdict.block i { background: var(--critical) } .verdict.ask i { background: var(--warning); color: #3b2a00 } .verdict.allow i { background: var(--good) }
-  ul.reasons { margin: 14px 0 0; padding-left: 20px } ul.reasons li { margin: 4px 0 }
-  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px }
-  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px }
-  .tile .k { color: var(--text-2); font-size: 13px; display: flex; align-items: center; gap: 6px }
-  .tile .v { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px }
-  .dot { width: 9px; height: 9px; border-radius: 50% } .dot.block { background: var(--critical) } .dot.ask { background: var(--warning) }
-  .bars .b { display: grid; grid-template-columns: 170px 1fr 48px; gap: 10px; align-items: center; padding: 5px 0; cursor: default }
-  .bars .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px }
-  .bars .track { height: 16px; position: relative }
-  .bars .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--series-1); border-radius: 0 4px 4px 0; min-width: 2px }
-  .bars .b:hover .fill { filter: brightness(1.12) }
-  .bars .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); font-size: 14px }
-  .empty { color: var(--text-3); font-size: 14px; padding: 8px 0 }
-  table { width: 100%; border-collapse: collapse; font-size: 14px }
-  th { text-align: left; color: var(--text-2); font-weight: 500; font-size: 13px; padding: 8px; border-bottom: 1px solid var(--line) }
-  td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top }
-  td.num { font-variant-numeric: tabular-nums; text-align: right }
-  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600 }
-  .tip { position: fixed; pointer-events: none; background: #0b0b0b; color: #fff; font-size: 13px; padding: 6px 9px; border-radius: 6px; display: none; z-index: 10 }
-  .toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); background: #0b0b0b; color: #fff; padding: 10px 16px; border-radius: 8px; display: none; z-index: 20 }
-  .err { color: var(--critical) }
-  .lang { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden }
-  .lang button { border: 0; background: var(--surface); padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer; color: var(--text-2) }
-  .lang button.on { background: var(--accent-weak); color: var(--text); font-weight: 600 }
-</style>
+<title>PII Guard Console</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
@@ -106,62 +16,64 @@
   </span>
 </header>
 <nav id="tabs">
-  <button data-t="policy" class="on" data-i18n="tab_policy"></button>
+  <button data-t="overview" class="on" data-i18n="tab_overview"></button>
+  <button data-t="policy" data-i18n="tab_policy"></button>
   <button data-t="test" data-i18n="tab_test"></button>
-  <button data-t="activity" data-i18n="tab_activity"></button>
+  <button data-t="logs" data-i18n="tab_logs"></button>
+  <button data-t="alerts" data-i18n="tab_alerts"></button>
   <button data-t="history" data-i18n="tab_history"></button>
 </nav>
 
 <main>
-  <section class="tab on" id="t-policy">
-    <div class="banner" id="loaded-banner"></div>
-
-    <div class="card">
-      <h2 data-i18n="sens_title"></h2>
-      <p class="sub" data-i18n="sens_sub"></p>
-      <div class="grid3" id="sens"></div>
+  <!-- Overview: health, KPIs, charts -->
+  <section class="tab on" id="t-overview">
+    <div class="toolbar">
+      <select id="ov-hours"><option value="1" data-i18n="h1"></option><option value="24" selected data-i18n="h24"></option><option value="168" data-i18n="d7"></option><option value="720" data-i18n="d30"></option></select>
+      <button class="btn" id="ov-refresh" data-i18n="refresh"></button>
+      <label class="check"><input type="checkbox" id="ov-auto"> <span data-i18n="auto_refresh"></span></label>
     </div>
-
-    <div class="card">
-      <h2 data-i18n="cats_title"></h2>
-      <p class="sub" data-i18n="cats_sub"></p>
-      <div class="legend">
-        <span data-i18n-html="legend_block"></span>
-        <span data-i18n-html="legend_ask"></span>
-        <span data-i18n-html="legend_allow"></span>
-      </div>
-      <div id="cats"></div>
+    <div class="grid4" id="health"></div>
+    <div class="grid5" id="kpis"></div>
+    <div class="grid2">
+      <div class="card"><h2 data-i18n="ch_decisions"></h2><p class="sub" id="ch-decisions-sub"></p><div id="ch-decisions"></div></div>
+      <div class="card"><h2 data-i18n="ch_latency"></h2><p class="sub" data-i18n="ch_latency_sub"></p><div id="ch-latency"></div></div>
     </div>
-
-    <div class="card">
-      <h2 data-i18n="rules_title"></h2>
-      <p class="sub" data-i18n-html="rules_sub"></p>
-      <div class="tpl" id="tpl"></div>
-      <div id="rules"></div>
-      <button class="btn" id="add-rule" data-i18n="add_rule"></button>
-      <p class="hint" data-i18n="rules_tip"></p>
+    <div class="grid2">
+      <div class="card"><h2 data-i18n="by_cat"></h2><p class="sub" data-i18n="by_cat_sub"></p><div class="bars" id="by-cat"></div></div>
+      <div class="card"><h2 data-i18n="by_client"></h2><p class="sub" data-i18n="by_client_sub"></p><div class="bars" id="by-client"></div></div>
     </div>
-
     <div class="card">
-      <h2 data-i18n="allow_title"></h2>
-      <p class="sub" data-i18n="allow_sub"></p>
-      <label class="f" data-i18n="allow_domains"></label>
-      <div class="chips" data-list="email_domains"><input data-i18n-ph="allow_domains_ph"></div>
-      <label class="f" data-i18n="allow_terms"></label>
-      <div class="chips" data-list="terms"><input data-i18n-ph="allow_terms_ph"></div>
-    </div>
-
-    <div class="card">
-      <h2 data-i18n="msg_title"></h2>
-      <p class="sub" data-i18n="msg_sub"></p>
-      <textarea id="message" data-i18n-ph="msg_ph"></textarea>
+      <div class="toolbar" style="margin:0 0 6px"><h2 style="margin:0" data-i18n="recent"></h2><span class="spacer"></span><button class="btn ghost small" id="ov-to-logs" data-i18n="view_logs"></button></div>
+      <div id="recent"></div>
     </div>
   </section>
 
+  <!-- Policy editor -->
+  <section class="tab" id="t-policy">
+    <div class="banner" id="loaded-banner"></div>
+    <div class="card"><h2 data-i18n="sens_title"></h2><p class="sub" data-i18n="sens_sub"></p><div class="grid3" id="sens"></div></div>
+    <div class="card">
+      <h2 data-i18n="cats_title"></h2><p class="sub" data-i18n="cats_sub"></p>
+      <div class="legend"><span data-i18n-html="legend_block"></span><span data-i18n-html="legend_ask"></span><span data-i18n-html="legend_allow"></span></div>
+      <div id="cats"></div>
+    </div>
+    <div class="card">
+      <h2 data-i18n="rules_title"></h2><p class="sub" data-i18n-html="rules_sub"></p>
+      <div class="tpl" id="tpl"></div><div id="rules"></div>
+      <button class="btn" id="add-rule" data-i18n="add_rule"></button><p class="hint" data-i18n="rules_tip"></p>
+    </div>
+    <div class="card">
+      <h2 data-i18n="allow_title"></h2><p class="sub" data-i18n="allow_sub"></p>
+      <label class="f" data-i18n="allow_domains"></label><div class="chips" data-list="email_domains"><input data-i18n-ph="allow_domains_ph"></div>
+      <label class="f" data-i18n="allow_terms"></label><div class="chips" data-list="terms"><input data-i18n-ph="allow_terms_ph"></div>
+    </div>
+    <div class="card"><h2 data-i18n="msg_title"></h2><p class="sub" data-i18n="msg_sub"></p><textarea id="message" data-i18n-ph="msg_ph"></textarea></div>
+  </section>
+
+  <!-- Test a draft policy -->
   <section class="tab" id="t-test">
     <div class="card">
-      <h2 data-i18n="test_title"></h2>
-      <p class="sub" data-i18n-html="test_sub"></p>
+      <h2 data-i18n="test_title"></h2><p class="sub" data-i18n-html="test_sub"></p>
       <div class="tpl" id="samples"></div>
       <textarea id="test-text" rows="7" data-i18n-ph="test_ph"></textarea>
       <div style="margin-top: 10px"><button class="btn primary" id="run-test" data-i18n="run_test"></button></div>
@@ -169,26 +81,35 @@
     <div class="card" id="test-result" hidden></div>
   </section>
 
-  <section class="tab" id="t-activity">
-    <div style="display:flex; align-items:center; gap:10px; margin-bottom: 14px">
-      <select id="hours"><option value="24" data-i18n="h24"></option><option value="168" data-i18n="d7"></option><option value="720" data-i18n="d30"></option></select>
-      <button class="btn" id="reload-stats" data-i18n="refresh"></button>
-      <span class="hint" style="margin:0" data-i18n="no_raw"></span>
+  <!-- Decision log + admin activity -->
+  <section class="tab" id="t-logs">
+    <div class="card">
+      <h2 data-i18n="logs_title"></h2><p class="sub" data-i18n="logs_sub"></p>
+      <div class="toolbar">
+        <select id="lg-hours"><option value="1" data-i18n="h1"></option><option value="24" selected data-i18n="h24"></option><option value="168" data-i18n="d7"></option><option value="720" data-i18n="d30"></option></select>
+        <select id="lg-decision"><option value="" data-i18n="f_decision_all"></option><option value="block" data-i18n="v_block"></option><option value="ask" data-i18n="v_ask"></option><option value="allow" data-i18n="v_allow"></option></select>
+        <select id="lg-client"><option value="" data-i18n="f_tool_all"></option></select>
+        <select id="lg-category"><option value="" data-i18n="f_cat_all"></option></select>
+        <input type="text" id="lg-q" data-i18n-ph="f_search_ph" style="flex:1;min-width:200px">
+        <button class="btn primary" id="lg-search" data-i18n="search"></button>
+        <button class="btn" id="lg-export" data-i18n="export"></button>
+      </div>
+      <div id="logs"></div>
     </div>
-    <div class="tiles" id="tiles"></div>
-    <div class="grid3" style="grid-template-columns: 1fr 1fr">
-      <div class="card"><h2 data-i18n="by_cat"></h2><p class="sub" data-i18n="by_cat_sub"></p><div class="bars" id="by-cat"></div></div>
-      <div class="card"><h2 data-i18n="by_client"></h2><p class="sub" data-i18n="by_client_sub"></p><div class="bars" id="by-client"></div></div>
-    </div>
-    <div class="card"><h2 data-i18n="recent"></h2><div id="recent"></div></div>
+    <div class="card"><h2 data-i18n="activity_title"></h2><p class="sub" data-i18n="activity_sub"></p><div id="activity"></div></div>
   </section>
 
-  <section class="tab" id="t-history">
+  <!-- Alerts -->
+  <section class="tab" id="t-alerts">
     <div class="card">
-      <h2 data-i18n="hist_title"></h2>
-      <p class="sub" data-i18n="hist_sub"></p>
-      <div id="versions"></div>
+      <h2 data-i18n="al_title"></h2><p class="sub" data-i18n="al_sub"></p>
+      <div id="alerts"></div>
     </div>
+  </section>
+
+  <!-- History -->
+  <section class="tab" id="t-history">
+    <div class="card"><h2 data-i18n="hist_title"></h2><p class="sub" data-i18n="hist_sub"></p><div id="versions"></div></div>
   </section>
 </main>
 
@@ -200,419 +121,9 @@
 <div class="tip" id="tip"></div>
 <div class="toast" id="toast"></div>
 
-<script>
-const $ = (s, el = document) => el.querySelector(s);
-const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const state = { cfg: null, meta: null, saved: null, draft: null, lang: 'en' };
-
-// ---------- i18n ----------
-// Category labels come from the API in the selected language; everything else is here.
-const I18N = {
-  en: {
-    title: 'PII Guard Policy Console', logout: 'Sign out', local_mode: 'Local mode',
-    tab_policy: 'Policy', tab_test: 'Test', tab_activity: 'Activity', tab_history: 'History',
-    sens_title: 'Sensitivity', sens_sub: 'How sure the model must be before it acts. Start with "Balanced".',
-    sens_lenient: 'Blocks only clear cases. Fewest false alarms; may miss short sentences.',
-    sens_balanced: 'Recommended. Blocks sensitive data about a specific person; asks when unsure.',
-    sens_strict: 'Missing nothing comes first. Expect more confirmation prompts.',
-    cats_title: 'Actions by information type', cats_sub: 'Choose what happens when a coding agent (Claude Code, Kiro, Codex) handles this kind of data.',
-    legend_block: '<b>Block</b>: the agent cannot use it', legend_ask: '<b>Ask</b>: the user confirms (tools without a prompt block instead)',
-    legend_allow: '<b>Allow</b>: not checked',
-    act_block: 'Block', act_ask: 'Ask', act_allow: 'Allow',
-    rules_title: 'Your own rules',
-    rules_sub: 'Write what you want to stop as a <b>yes/no question</b>. The model answers it for every check. No regex or code needed.',
-    add_rule: '+ Add rule', rules_tip: 'Tip: include other spellings, e.g. Phoenix (PHX). Try it on the Test tab before saving.',
-    rule_on: 'On', rule_name_ph: 'Rule name', rule_q_ph: 'A question that can be answered yes or no', rule_sens: 'Sensitivity {s}', delete: 'Delete',
-    no_rules: 'No rules yet. Click an example above to start.',
-    allow_title: 'Exceptions (allowlist)', allow_sub: 'These values are removed before checking, so they never cause a block.',
-    allow_domains: 'Email domains to allow (e.g. your company domain)', allow_domains_ph: 'type example.com and press Enter',
-    allow_terms: 'Words to ignore (e.g. fake test names or numbers)', allow_terms_ph: 'type Jane Doe and press Enter',
-    msg_title: 'Block message', msg_sub: 'Shown to developers when something is blocked. Leave empty for the default.',
-    msg_ph: 'e.g. Mask customer data before use. Questions: #privacy-help',
-    unsaved: 'You have unsaved changes.', discard: 'Discard', save: 'Save and apply',
-    saved_toast: 'Saved. All agents use it within 30 seconds.', save_failed: 'Save failed: {e}',
-    last_saved: 'Last saved {t}{by}', default_policy: 'Using the default policy (never saved)',
-    test_title: 'Test the policy',
-    test_sub: 'Paste text and check it. It uses your <b>current, unsaved settings</b>, so you can see the effect before saving. Nothing is logged.',
-    test_ph: 'Text to check', run_test: 'Check', checking: 'Checking…',
-    v_block: 'Blocked', v_ask: 'Needs confirmation', v_allow: 'Allowed', nothing_found: 'Nothing sensitive found.',
-    took: 'Took {ms} ms', ask_note: ' · "Ask" prompts the user in Claude Code and blocks in other tools.',
-    r_rule: 'Matches your rule <b>{name}</b> (model confidence {p}%)', r_regex: '<b>{label}</b> found: <code>{sample}</code>',
-    r_model: '<b>{label}</b> (model: sensitive {s}%, specific person {n}%)',
-    h24: 'Last 24 hours', d7: 'Last 7 days', d30: 'Last 30 days', refresh: 'Refresh',
-    no_raw: 'No text is stored. Only decisions, types and tool names are counted.',
-    total: 'Checks', blocked: 'Blocked', asked: 'Asked', by_cat: 'Why blocked or asked', by_cat_sub: 'Count by information type',
-    by_client: 'Checks by tool', by_client_sub: 'Which agent sent them', recent: 'Recent blocks and asks',
-    col_time: 'Time', col_decision: 'Decision', col_tool: 'Tool', col_target: 'Target', col_reason: 'Reason',
-    no_data: 'Nothing in this period.', no_recent: 'No blocks or asks in this period.', loading: 'Loading…', partial: 'Some numbers are still being computed; refresh in a moment.',
-    rule_prefix: 'Rule: ', count: '{n}',
-    hist_title: 'History', hist_sub: 'Every save is a version. "Load" brings an old version into the editor; save it to roll back.',
-    col_saved: 'Saved', col_by: 'By', current: '(current)', load: 'Load', no_versions: 'Nothing saved yet.',
-    loaded_banner: 'Loaded the version from {t}. Review it, then "Save and apply" to roll back to it.',
-    load_failed: 'Could not load: {e}',
-  },
-  ko: {
-    title: 'PII 가드 정책 관리', logout: '로그아웃', local_mode: '로컬 모드',
-    tab_policy: '정책', tab_test: '테스트', tab_activity: '활동', tab_history: '변경 이력',
-    sens_title: '기본 민감도', sens_sub: 'AI 모델이 얼마나 확신할 때 막을지 정합니다. 처음에는 "보통"을 권장합니다.',
-    sens_lenient: '확실한 경우만 차단합니다. 오탐이 가장 적지만 짧은 문장은 놓칠 수 있습니다.',
-    sens_balanced: '권장. 특정인의 민감 정보는 차단하고, 애매하면 확인을 요청합니다.',
-    sens_strict: '놓치지 않는 것이 우선입니다. 확인 요청이 늘어납니다.',
-    cats_title: '정보 유형별 동작', cats_sub: '코딩 에이전트(Claude Code, Kiro, Codex)가 아래 정보를 다루려 할 때 어떻게 할지 고르세요.',
-    legend_block: '<b>차단</b>: 에이전트가 그 내용을 쓰지 못하게 막음', legend_ask: '<b>확인</b>: 사용자에게 물어봄 (지원하지 않는 도구에서는 차단)',
-    legend_allow: '<b>허용</b>: 검사하지 않음',
-    act_block: '차단', act_ask: '확인', act_allow: '허용',
-    rules_title: '우리 회사만의 규칙',
-    rules_sub: '막고 싶은 내용을 <b>예/아니오로 답할 수 있는 질문</b>으로 적으면, AI 모델이 매번 그 질문으로 판단합니다. 정규식이나 코딩은 필요 없습니다.',
-    add_rule: '+ 규칙 추가', rules_tip: '팁: 다른 표기도 함께 적으면 더 잘 잡습니다. 예: Phoenix(피닉스). 저장 전에 "테스트" 탭에서 확인해 보세요.',
-    rule_on: '사용', rule_name_ph: '규칙 이름', rule_q_ph: '예/아니오로 답할 수 있는 질문', rule_sens: '민감도 {s}', delete: '삭제',
-    no_rules: '아직 규칙이 없습니다. 위의 예시를 눌러 시작해 보세요.',
-    allow_title: '예외 (허용 목록)', allow_sub: '여기 있는 값은 검사하기 전에 지워져서, 차단 사유가 되지 않습니다.',
-    allow_domains: '허용할 이메일 도메인 (예: 회사 도메인)', allow_domains_ph: 'example.com 입력 후 Enter',
-    allow_terms: '무시할 단어 (예: 테스트용 가짜 이름·번호)', allow_terms_ph: '홍길동 입력 후 Enter',
-    msg_title: '차단 안내 문구', msg_sub: '차단될 때 개발자에게 함께 보여 줄 안내입니다. 비워 두면 기본 문구를 씁니다.',
-    msg_ph: '예: 고객 데이터는 마스킹 후 사용하세요. 문의: 정보보호팀 #privacy-help',
-    unsaved: '저장하지 않은 변경이 있습니다.', discard: '되돌리기', save: '저장하고 적용',
-    saved_toast: '저장했습니다. 30초 안에 모든 에이전트에 적용됩니다.', save_failed: '저장 실패: {e}',
-    last_saved: '마지막 저장 {t}{by}', default_policy: '기본 정책 사용 중 (아직 저장한 적 없음)',
-    test_title: '정책 테스트',
-    test_sub: '문장을 넣고 검사해 보세요. <b>저장하지 않은 현재 설정</b>으로 검사하므로, 저장하기 전에 결과를 확인할 수 있습니다. 검사 내용은 기록되지 않습니다.',
-    test_ph: '검사할 텍스트', run_test: '검사하기', checking: '검사 중…',
-    v_block: '차단', v_ask: '확인 필요', v_allow: '허용', nothing_found: '민감 정보로 판단되는 내용이 없습니다.',
-    took: '검사 시간 {ms} ms', ask_note: ' · "확인"은 Claude Code 에서는 사용자에게 묻고, 다른 도구에서는 차단됩니다.',
-    r_rule: '회사 규칙 <b>{name}</b>에 해당 (모델 확신도 {p}%)', r_regex: '<b>{label}</b> 형식 발견: <code>{sample}</code>',
-    r_model: '<b>{label}</b> (AI 판단: 민감 정보 {s}%, 특정인 {n}%)',
-    h24: '최근 24시간', d7: '최근 7일', d30: '최근 30일', refresh: '새로고침',
-    no_raw: '원문은 저장되지 않습니다. 판정, 유형, 도구 이름만 집계합니다.',
-    total: '전체 검사', blocked: '차단', asked: '확인 요청', by_cat: '차단·확인 사유', by_cat_sub: '정보 유형별 건수',
-    by_client: '도구별 검사 수', by_client_sub: '어떤 에이전트에서 검사했는지', recent: '최근 차단·확인',
-    col_time: '시각', col_decision: '판정', col_tool: '도구', col_target: '대상', col_reason: '사유',
-    no_data: '기간 내 기록이 없습니다.', no_recent: '기간 내 차단·확인 기록이 없습니다.', loading: '불러오는 중…', partial: '일부 집계가 아직 끝나지 않았습니다. 잠시 후 새로고침하세요.',
-    rule_prefix: '회사 규칙: ', count: '{n}건',
-    hist_title: '변경 이력', hist_sub: '저장할 때마다 새 버전이 남습니다. "불러오기"로 예전 설정을 가져온 뒤 저장하면 그 버전으로 되돌아갑니다.',
-    col_saved: '저장 시각', col_by: '저장한 사람', current: '(현재)', load: '불러오기', no_versions: '아직 저장한 버전이 없습니다.',
-    loaded_banner: '{t} 버전을 불러왔습니다. 확인 후 "저장하고 적용"을 누르면 이 설정으로 되돌아갑니다.',
-    load_failed: '불러오기 실패: {e}',
-  },
-};
-const TEMPLATES = {
-  en: [
-    { name: 'Unreleased project details', question: "Does the text include unreleased schedules, revenue or launch plans for the internal project 'Phoenix' (PHX)?" },
-    { name: 'Employee salary / reviews', question: 'Does the text include an employee\'s salary, compensation or performance review?' },
-    { name: 'Customer contract terms', question: 'Does the text include contract amounts or terms agreed with a customer?' },
-    { name: 'Unpublished financials', question: 'Does the text include revenue, profit or other financial figures that are not yet public?' },
-  ],
-  ko: [
-    { name: '사내 프로젝트 미공개 정보', question: "사내 프로젝트 'Phoenix(피닉스)'의 미공개 일정, 매출, 출시 계획이 포함되어 있나요?" },
-    { name: '직원 급여·인사 정보', question: '직원의 급여, 연봉, 인사 평가 정보가 포함되어 있나요?' },
-    { name: '고객사 계약 조건', question: '고객사와의 계약 금액이나 계약 조건이 포함되어 있나요?' },
-    { name: '미공개 실적', question: '공시 전 매출, 영업이익 등 미공개 실적 수치가 포함되어 있나요?' },
-  ],
-};
-const SAMPLES = {
-  en: [
-    { label: 'Customer list', text: 'customer_id,name,phone,email\nC-1001,Jane Doe,+1-415-555-0199,jane@acme.com' },
-    { label: 'Support note', text: 'Support note: customer Mark Chen is being treated for depression and asked us not to call at night.' },
-    { label: 'Code (schema)', text: 'CREATE TABLE customers (id INT, name VARCHAR(100), phone VARCHAR(20), email VARCHAR(255));' },
-    { label: 'Internal project', text: 'Phoenix launches next March; Q1 revenue is projected at $9M.' },
-    { label: 'General question', text: 'Show me an S3 bucket policy that allows cross-account access.' },
-  ],
-  ko: [
-    { label: '고객 명단', text: 'customer_id,name,phone,email\nC-1001,김민수,010-2345-6789,minsu.kim@example.com' },
-    { label: '상담 메모', text: '상담 메모: 고객 정우성님(40대)은 최근 우울증 치료 중이라 야간 연락을 원하지 않음.' },
-    { label: '코드 (스키마)', text: 'CREATE TABLE customers (id INT, name VARCHAR(100), phone VARCHAR(20), email VARCHAR(255));' },
-    { label: '사내 프로젝트', text: 'Phoenix 는 내년 3월 출시 예정이고 1분기 예상 매출은 120억입니다.' },
-    { label: '일반 질문', text: 'S3 버킷 정책에서 교차 계정 접근을 허용하는 예시를 보여줘.' },
-  ],
-};
-const CLIENT_LABEL = { claude: 'Claude Code', kiro: 'Kiro CLI', codex: 'Codex CLI', litellm: 'LiteLLM', cli: 'CLI', console: 'Console' };
-
-const T = (key, vars = {}) => (I18N[state.lang][key] ?? I18N.en[key] ?? key).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
-const fmtTime = v => new Date(v).toLocaleString(state.lang === 'ko' ? 'ko-KR' : 'en-US');
-const fmtNum = n => Number(n).toLocaleString(state.lang === 'ko' ? 'ko-KR' : 'en-US');
-
-function applyStatic() {
-  document.documentElement.lang = state.lang;
-  document.title = T('title');
-  $$('[data-i18n]').forEach(el => el.textContent = T(el.dataset.i18n));
-  $$('[data-i18n-html]').forEach(el => el.innerHTML = T(el.dataset.i18nHtml));
-  $$('[data-i18n-ph]').forEach(el => el.placeholder = T(el.dataset.i18nPh));
-  $$('#lang button').forEach(b => b.classList.toggle('on', b.dataset.lang === state.lang));
-  $('#tpl').innerHTML = TEMPLATES[state.lang].map((t, i) => `<button data-t="${i}">+ ${esc(t.name)}</button>`).join('');
-  $('#samples').innerHTML = SAMPLES[state.lang].map((s, i) => `<button data-s="${i}">${esc(s.label)}</button>`).join('');
-  if (state.cfg?.mode !== 'cognito') $('#who').textContent = T('local_mode');
-}
-
-async function setLang(lang) {
-  state.lang = lang;
-  localStorage.setItem('lang', lang);
-  applyStatic();
-  if (!state.saved) return;
-  state.meta = (await api('/api/policy')).meta;   // category labels in the new language
-  renderPolicy();
-  const tab = $('#tabs button.on').dataset.t;
-  if (tab === 'activity') loadStats();
-  if (tab === 'history') loadHistory();
-}
-
-// ---------- auth (Cognito hosted UI, authorization code + PKCE) ----------
-const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-const jwtClaims = t => JSON.parse(decodeURIComponent(escape(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))));
-
-async function login() {
-  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
-  sessionStorage.setItem('pkce', verifier);
-  const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
-  const q = new URLSearchParams({ response_type: 'code', client_id: state.cfg.clientId, redirect_uri: state.cfg.redirectUri,
-    scope: 'openid email', code_challenge_method: 'S256', code_challenge: challenge });
-  location.href = `${state.cfg.cognitoDomain}/oauth2/authorize?${q}`;
-  return new Promise(() => {});
-}
-
-async function ensureLogin() {
-  if (state.cfg.mode !== 'cognito') return;
-  const code = new URLSearchParams(location.search).get('code');
-  if (code) {
-    const r = await fetch(`${state.cfg.cognitoDomain}/oauth2/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ grant_type: 'authorization_code', client_id: state.cfg.clientId, code, redirect_uri: state.cfg.redirectUri,
-        code_verifier: sessionStorage.getItem('pkce') || '' }) });
-    const t = await r.json();
-    if (t.id_token) sessionStorage.setItem('id_token', t.id_token);
-    history.replaceState({}, '', state.cfg.redirectUri);
-  }
-  const tok = sessionStorage.getItem('id_token');
-  if (!tok || jwtClaims(tok).exp * 1000 < Date.now() + 30000) return login();
-  $('#who').textContent = jwtClaims(tok).email || '';
-  $('#logout').hidden = false;
-  $('#logout').onclick = () => {
-    sessionStorage.removeItem('id_token');
-    location.href = `${state.cfg.cognitoDomain}/logout?${new URLSearchParams({ client_id: state.cfg.clientId, logout_uri: state.cfg.redirectUri })}`;
-  };
-}
-
-async function api(path, opts = {}) {
-  const headers = { 'content-type': 'application/json', 'x-lang': state.lang };
-  if (state.cfg.mode === 'cognito') headers.authorization = `Bearer ${sessionStorage.getItem('id_token')}`;
-  const r = await fetch(state.cfg.apiBase.replace(/\/$/, '') + path, { ...opts, headers });
-  if (r.status === 401) return login();
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body.error || body.message || `HTTP ${r.status}`);
-  return body;
-}
-
-function toast(msg) {
-  const t = $('#toast'); t.textContent = msg; t.style.display = 'block';
-  clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = 'none', 2600);
-}
-
-// ---------- policy tab ----------
-const clone = o => JSON.parse(JSON.stringify(o));
-const comparable = p => { const c = clone(p); delete c.updated_at; delete c.updated_by; return JSON.stringify(c); };
-
-function renderPolicy() {
-  const d = state.draft, m = state.meta;
-  $('#sens').innerHTML = m.sensitivities.map(s => `
-    <div class="choice ${d.sensitivity === s.id ? 'on' : ''}" data-sens="${s.id}" role="radio" aria-checked="${d.sensitivity === s.id}" tabindex="0">
-      <b>${esc(s.label)}</b><span>${esc(T('sens_' + s.id))}</span></div>`).join('');
-  $('#cats').innerHTML = m.categories.map(c => `
-    <div class="cat"><div class="info"><b>${esc(c.label)}</b><span>${esc(c.desc)}</span></div>
-      <div class="seg" data-cat="${c.id}" role="radiogroup" aria-label="${esc(c.label)}">${['block', 'ask', 'allow'].map(v =>
-        `<button data-v="${v}" class="${d.categories[c.id] === v ? 'on' : ''}" aria-pressed="${d.categories[c.id] === v}">${T('act_' + v)}</button>`).join('')}</div></div>`).join('');
-  $('#rules').innerHTML = d.custom_rules.length ? d.custom_rules.map((r, i) => `
-    <div class="rule ${r.enabled ? '' : 'off'}" data-i="${i}">
-      <div class="row">
-        <label style="display:flex;gap:6px;align-items:center;white-space:nowrap"><input type="checkbox" data-k="enabled" ${r.enabled ? 'checked' : ''}> ${T('rule_on')}</label>
-        <input type="text" data-k="name" value="${esc(r.name)}" placeholder="${esc(T('rule_name_ph'))}">
-        <select data-k="action">${['block', 'ask'].map(v => `<option value="${v}" ${r.action === v ? 'selected' : ''}>${T('act_' + v)}</option>`).join('')}</select>
-        <select data-k="sensitivity">${m.sensitivities.map(s => `<option value="${s.id}" ${r.sensitivity === s.id ? 'selected' : ''}>${esc(T('rule_sens', { s: s.label }))}</option>`).join('')}</select>
-        <button class="btn ghost" data-del>${T('delete')}</button>
-      </div>
-      <textarea data-k="question" rows="2" placeholder="${esc(T('rule_q_ph'))}">${esc(r.question)}</textarea>
-    </div>`).join('') : `<p class="empty">${T('no_rules')}</p>`;
-  for (const el of $$('.chips')) {
-    const key = el.dataset.list;
-    $$('.chip', el).forEach(c => c.remove());
-    el.insertAdjacentHTML('afterbegin', d.allow[key].map((v, i) => `<span class="chip">${esc(v)}<button data-rm="${i}" aria-label="${T('delete')}">×</button></span>`).join(''));
-  }
-  if (document.activeElement !== $('#message')) $('#message').value = d.message || '';
-  $('#ver').textContent = state.saved.updated_at
-    ? T('last_saved', { t: fmtTime(state.saved.updated_at), by: state.saved.updated_by ? ' · ' + state.saved.updated_by : '' })
-    : T('default_policy');
-  markDirty();
-}
-
-function markDirty() {
-  $('#savebar').classList.toggle('on', comparable(state.draft) !== comparable(state.saved));
-}
-
-function bindPolicy() {
-  $('#sens').addEventListener('click', e => { const c = e.target.closest('[data-sens]'); if (!c) return; state.draft.sensitivity = c.dataset.sens; renderPolicy(); });
-  $('#sens').addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset.sens) { e.preventDefault(); e.target.click(); } });
-  $('#cats').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if (!b) return; state.draft.categories[b.parentElement.dataset.cat] = b.dataset.v; renderPolicy(); });
-  $('#tpl').addEventListener('click', e => { const b = e.target.closest('[data-t]'); if (b) addRule(TEMPLATES[state.lang][b.dataset.t]); });
-  $('#add-rule').onclick = () => addRule({ name: '', question: '' });
-  const rules = $('#rules');
-  rules.addEventListener('input', e => {
-    const k = e.target.dataset.k, i = e.target.closest('[data-i]')?.dataset.i; if (!k || i == null) return;
-    state.draft.custom_rules[i][k] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
-    if (k === 'enabled') e.target.closest('.rule').classList.toggle('off', !e.target.checked);
-    markDirty();
-  });
-  rules.addEventListener('click', e => { if (!e.target.hasAttribute('data-del')) return; state.draft.custom_rules.splice(e.target.closest('[data-i]').dataset.i, 1); renderPolicy(); });
-  for (const el of $$('.chips')) {
-    const key = el.dataset.list, input = $('input', el);
-    input.addEventListener('keydown', e => {
-      if ((e.key === 'Enter' || e.key === ',') && input.value.trim()) {
-        e.preventDefault();
-        const v = input.value.trim().replace(/^@/, '');
-        if (!state.draft.allow[key].includes(v)) state.draft.allow[key].push(v);
-        input.value = ''; renderPolicy(); $('input', el).focus();
-      }
-    });
-    el.addEventListener('click', e => { if (e.target.dataset.rm == null) return input.focus(); state.draft.allow[key].splice(e.target.dataset.rm, 1); renderPolicy(); });
-  }
-  $('#message').addEventListener('input', e => { state.draft.message = e.target.value; markDirty(); });
-  $('#discard').onclick = () => { state.draft = clone(state.saved); $('#loaded-banner').classList.remove('on'); renderPolicy(); };
-  $('#save').onclick = save;
-}
-
-function addRule(t) {
-  state.draft.custom_rules.push({ id: 'r' + Date.now().toString(36), name: t.name, question: t.question, action: 'block', sensitivity: 'balanced', enabled: true });
-  renderPolicy();
-  $$('#rules textarea').at(-1)?.focus();
-}
-
-async function save() {
-  $('#save').disabled = true;
-  try {
-    const r = await api('/api/policy', { method: 'PUT', body: JSON.stringify({ policy: state.draft }) });
-    state.saved = r.policy; state.draft = clone(r.policy);
-    $('#loaded-banner').classList.remove('on');
-    renderPolicy();
-    toast(T('saved_toast'));
-  } catch (e) { toast(T('save_failed', { e: e.message })); }
-  $('#save').disabled = false;
-}
-
-// ---------- test tab ----------
-function friendlyReason(f) {
-  const L = state.meta.labels, pct = x => Math.round(x * 100);
-  if (f.source === 'rule') return T('r_rule', { name: esc(f.name), p: pct(f.p) });
-  if (f.source === 'regex') return T('r_regex', { label: esc(L[f.type] || f.type), sample: esc(f.sample) });
-  return T('r_model', { label: esc(L[f.type] || f.type), s: pct(f.kind_confidence), n: pct(f.p_named) });
-}
-
-async function runTest() {
-  const box = $('#test-result');
-  box.hidden = false; box.innerHTML = `<p class="empty">${T('checking')}</p>`;
-  try {
-    const r = await api('/api/test', { method: 'POST', body: JSON.stringify({ text: $('#test-text').value, policy: state.draft }) });
-    const res = r.results[0] || { findings: [], latency_ms: 0 };
-    const icon = { block: '✕', ask: '!', allow: '✓' }[r.decision];
-    const findings = r.decision === 'allow' ? [] : res.findings;
-    box.innerHTML = `<div class="verdict ${r.decision}"><i>${icon}</i>${T('v_' + r.decision)}</div>
-      ${findings.length ? `<ul class="reasons">${findings.map(f => `<li>${friendlyReason(f)}</li>`).join('')}</ul>` : `<p class="sub" style="margin-top:12px">${T('nothing_found')}</p>`}
-      <p class="hint">${T('took', { ms: Math.round(res.latency_ms) })}${r.decision === 'ask' ? T('ask_note') : ''}</p>`;
-  } catch (e) { box.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
-}
-
-// ---------- activity tab ----------
-function catLabel(key) {
-  if (key.startsWith('rule:')) return T('rule_prefix') + key.slice(5);
-  return state.meta.categories.find(c => c.id === key)?.label || state.meta.labels[key] || key;
-}
-
-function bars(el, rows, labelOf) {
-  if (!rows.length) { el.innerHTML = `<p class="empty">${T('no_data')}</p>`; return; }
-  const max = Math.max(...rows.map(r => r.n));
-  el.innerHTML = rows.map(r => `<div class="b" data-tip="${esc(labelOf(r.key))}: ${esc(T('count', { n: fmtNum(r.n) }))}">
-    <span class="name">${esc(labelOf(r.key))}</span><span class="track"><span class="fill" style="width:${(r.n / max * 100).toFixed(1)}%"></span></span>
-    <span class="num">${fmtNum(r.n)}</span></div>`).join('');
-}
-
-async function loadStats() {
-  $('#tiles').innerHTML = `<p class="empty">${T('loading')}</p>`;
-  try {
-    const s = await api(`/api/stats?hours=${$('#hours').value}`);
-    $('#tiles').innerHTML = `
-      <div class="tile"><div class="k">${T('total')}</div><div class="v">${fmtNum(s.total)}</div></div>
-      <div class="tile"><div class="k"><span class="dot block"></span>${T('blocked')}</div><div class="v">${fmtNum(s.block)}</div></div>
-      <div class="tile"><div class="k"><span class="dot ask"></span>${T('asked')}</div><div class="v">${fmtNum(s.ask)}</div></div>`;
-    bars($('#by-cat'), s.by_category, catLabel);
-    bars($('#by-client'), s.by_client, k => CLIENT_LABEL[k] || k);
-    $('#recent').innerHTML = s.recent.length ? `<table><thead><tr><th>${T('col_time')}</th><th>${T('col_decision')}</th><th>${T('col_tool')}</th><th>${T('col_target')}</th><th>${T('col_reason')}</th><th style="text-align:right">ms</th></tr></thead><tbody>
-      ${s.recent.map(e => `<tr><td>${esc(fmtTime(e.ts))}</td>
-        <td><span class="pill"><span class="dot ${e.decision}"></span>${T(e.decision === 'block' ? 'v_block' : 'v_ask')}</span></td>
-        <td>${esc(CLIENT_LABEL[e.client] || e.client || '-')}</td><td>${esc(e.sources || '')}</td>
-        <td>${esc((e.categories || '').split(',').filter(Boolean).map(catLabel).join(', '))}</td><td class="num">${esc(e.ms ?? '')}</td></tr>`).join('')}
-      </tbody></table>` : `<p class="empty">${T('no_recent')}</p>`;
-    if (s.partial) toast(T('partial'));
-  } catch (e) { $('#tiles').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
-}
-
-// ---------- history tab ----------
-async function loadHistory() {
-  const el = $('#versions');
-  el.innerHTML = `<p class="empty">${T('loading')}</p>`;
-  try {
-    const { versions } = await api('/api/history');
-    el.innerHTML = versions.length ? `<table><thead><tr><th>${T('col_saved')}</th><th>${T('col_by')}</th><th></th></tr></thead><tbody>
-      ${versions.map((v, i) => `<tr><td>${esc(fmtTime(v.saved_at))}${i === 0 ? ` <span class="hint">${T('current')}</span>` : ''}</td><td>${esc(v.by || '-')}</td>
-        <td style="text-align:right">${i === 0 ? '' : `<button class="btn" data-load="${esc(v.version_id)}" data-when="${esc(v.saved_at)}">${T('load')}</button>`}</td></tr>`).join('')}
-      </tbody></table>` : `<p class="empty">${T('no_versions')}</p>`;
-  } catch (e) { el.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
-}
-
-async function loadVersion(id, when) {
-  try {
-    const { policy } = await api(`/api/history/${encodeURIComponent(id)}`);
-    state.draft = clone(policy);
-    showTab('policy'); renderPolicy();
-    const b = $('#loaded-banner');
-    b.textContent = T('loaded_banner', { t: fmtTime(when) });
-    b.classList.add('on');
-  } catch (e) { toast(T('load_failed', { e: e.message })); }
-}
-
-// ---------- shell ----------
-function showTab(t) {
-  $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
-  $$('section.tab').forEach(s => s.classList.toggle('on', s.id === 't-' + t));
-  if (t === 'activity') loadStats();
-  if (t === 'history') loadHistory();
-}
-
-function bindTooltips() {
-  const tip = $('#tip');
-  document.addEventListener('mousemove', e => {
-    const el = e.target.closest('[data-tip]');
-    if (!el) { tip.style.display = 'none'; return; }
-    tip.textContent = el.dataset.tip; tip.style.display = 'block';
-    tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + 'px'; tip.style.top = (e.clientY + 14) + 'px';
-  });
-}
-
-async function main() {
-  const q = new URLSearchParams(location.search).get('lang');
-  state.lang = [q, localStorage.getItem('lang'), (navigator.language || '').slice(0, 2)].find(l => l in I18N) || 'en';
-  state.cfg = await (await fetch('config.json', { cache: 'no-store' })).json();
-  applyStatic();
-  await ensureLogin();
-  const r = await api('/api/policy');
-  state.meta = r.meta; state.saved = r.policy; state.draft = clone(r.policy);
-  bindPolicy(); renderPolicy(); bindTooltips();
-  $('#lang').addEventListener('click', e => { const b = e.target.closest('[data-lang]'); if (b) setLang(b.dataset.lang); });
-  $('#tabs').addEventListener('click', e => { const b = e.target.closest('button[data-t]'); if (b) { history.replaceState({}, '', location.pathname + location.search + '#' + b.dataset.t); showTab(b.dataset.t); } });
-  $('#samples').addEventListener('click', e => { const b = e.target.closest('[data-s]'); if (b) $('#test-text').value = SAMPLES[state.lang][b.dataset.s].text; });
-  $('#run-test').onclick = runTest;
-  $('#reload-stats').onclick = loadStats; $('#hours').onchange = loadStats;
-  $('#versions').addEventListener('click', e => { const b = e.target.closest('[data-load]'); if (b) loadVersion(b.dataset.load, b.dataset.when); });
-  addEventListener('beforeunload', e => { if (comparable(state.draft) !== comparable(state.saved)) e.preventDefault(); });
-  const first = location.hash.slice(1);
-  if (['test', 'activity', 'history'].includes(first)) showTab(first);
-}
-main().catch(e => { document.querySelector('main').innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; });
-</script>
+<script src="i18n.js"></script>
+<script src="samples.js"></script>
+<script src="charts.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

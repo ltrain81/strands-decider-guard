@@ -1,42 +1,31 @@
 """Admin API for the policy console (API Gateway HTTP API + Cognito JWT, or admin/dev_server.py locally).
 
-  GET  /api/policy                 current policy + category/sensitivity metadata
-  PUT  /api/policy                 {"policy": {...}} -> validate and save (new version)
-  POST /api/test                   {"text": "...", "policy": {...draft}} -> verdict with the draft policy
-  GET  /api/history                saved versions (newest first)
-  GET  /api/history/{version_id}   one saved version
-  GET  /api/stats?hours=24         decision counts and recent blocks (no raw text exists to show)
+  GET  /api/policy                  current policy + category/sensitivity metadata
+  PUT  /api/policy                  {"policy": {...}} -> validate, save a new version, log who changed what
+  POST /api/test                    {"text", "policy"} -> verdict under a draft policy (not logged)
+  GET  /api/history                 saved versions, newest first
+  GET  /api/history/{version}       one version + what differs from the current policy
+  GET  /api/overview?hours=24       health, KPIs and time series (monitoring.py)
+  GET  /api/logs?hours&decision&client&category&q&limit   decision log search (no text exists to show)
+  GET  /api/activity?hours=168      admin actions: policy and alert changes
+  GET  /api/alerts                  alert settings, email subscription and alarm states (alerts.py)
+  PUT  /api/alerts                  {"alerts": {...}} -> save and apply
+  POST /api/alerts/test             send a test notification
 
-AWS mode: POLICY_BUCKET/POLICY_KEY (versioned S3), GUARD_FUNCTION (dry-run tests), GUARD_LOG_GROUP (stats).
-Local mode (dev_server.py): POLICY_FILE, LOCAL_DECIDER_URL and AUDIT_LOG instead.
+Also invoked by a 5-minute EventBridge schedule ({"health_check": true}) to publish the guard health metric.
+Modes and settings: see common.py.
 """
 import base64
 import datetime as dt
 import json
 import os
-import time
 
+import alerts
 import guard_core
+import monitoring
+from common import GUARD_FUNCTION, LOCAL_DECIDER_URL, POLICY_BUCKET, POLICY_FILE, POLICY_KEY, aws
 
-POLICY_BUCKET = os.environ.get("POLICY_BUCKET")
-POLICY_KEY = os.environ.get("POLICY_KEY", "policy.json")
-GUARD_FUNCTION = os.environ.get("GUARD_FUNCTION")
-GUARD_LOG_GROUP = os.environ.get("GUARD_LOG_GROUP")
-POLICY_FILE = os.environ.get("POLICY_FILE")
-LOCAL_DECIDER_URL = os.environ.get("LOCAL_DECIDER_URL")
-AUDIT_LOG = os.environ.get("AUDIT_LOG")
 MAX_TEST_CHARS = 20000
-
-_clients = {}
-
-
-def _aws(name):
-    if name not in _clients:
-        import boto3
-        _clients[name] = boto3.client(name)
-    return _clients[name]
-
-
 MESSAGES = {
     "en": {"bad_json": "The request body is not valid JSON", "no_text": "Enter some text to check", "server": "Server error: {e}"},
     "ko": {"bad_json": "JSON 형식이 아닙니다", "no_text": "검사할 텍스트를 입력하세요", "server": "서버 오류: {e}"},
@@ -49,10 +38,16 @@ def meta(lang):
         "sensitivities": [{"id": k, "label": v} for k, v in guard_core.SENSITIVITY_LABELS[lang].items()],
         "labels": guard_core.PATTERN_LABELS[lang],
         "limits": guard_core.LIMITS,
+        "local": bool(POLICY_FILE),
     }
 
 
-# ---------- storage ----------
+def audit(action, user, detail=None):
+    """One JSON line per admin action; the Logs tab's "admin activity" reads these back."""
+    print(json.dumps({"action": action, "by": user, "detail": detail}, ensure_ascii=False), flush=True)
+
+
+# ---------- policy storage ----------
 
 def load_policy(version_id=None):
     if POLICY_FILE:
@@ -61,33 +56,36 @@ def load_policy(version_id=None):
                 return guard_core.normalize_policy(json.load(f)), "local"
         except FileNotFoundError:
             return guard_core.normalize_policy(None), None
+    s3 = aws("s3")
     try:
         kw = {"Bucket": POLICY_BUCKET, "Key": POLICY_KEY}
         if version_id:
             kw["VersionId"] = version_id
-        obj = _aws("s3").get_object(**kw)
+        obj = s3.get_object(**kw)
         return guard_core.normalize_policy(json.load(obj["Body"])), obj.get("VersionId")
-    except _aws("s3").exceptions.NoSuchKey:
+    except s3.exceptions.NoSuchKey:
         return guard_core.normalize_policy(None), None
 
 
 def save_policy(policy, user, lang="en"):
+    old, _ = load_policy()
     policy = guard_core.normalize_policy(policy, lang)
     policy["updated_at"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     policy["updated_by"] = user
     body = json.dumps(policy, ensure_ascii=False, indent=2).encode()
     if POLICY_FILE:
         os.makedirs(os.path.dirname(POLICY_FILE) or ".", exist_ok=True)
-        hist = POLICY_FILE + ".history.jsonl"
-        with open(hist, "a") as f:
+        with open(POLICY_FILE + ".history.jsonl", "a") as f:
             f.write(json.dumps(policy, ensure_ascii=False) + "\n")
         with open(POLICY_FILE, "wb") as f:
             f.write(body)
-        return policy, "local"
-    user_meta = user.encode("ascii", "replace").decode()[:100]
-    resp = _aws("s3").put_object(Bucket=POLICY_BUCKET, Key=POLICY_KEY, Body=body, ContentType="application/json",
-                                 Metadata={"updated-by": user_meta})
-    return policy, resp.get("VersionId")
+        version = "local"
+    else:
+        resp = aws("s3").put_object(Bucket=POLICY_BUCKET, Key=POLICY_KEY, Body=body, ContentType="application/json",
+                                    Metadata={"updated-by": user.encode("ascii", "replace").decode()[:100]})
+        version = resp.get("VersionId")
+    audit("policy_saved", user, monitoring.policy_changes(old, policy))
+    return policy, version
 
 
 def history():
@@ -101,10 +99,11 @@ def history():
         except FileNotFoundError:
             pass
         return out[::-1][:30]
-    vs = _aws("s3").list_object_versions(Bucket=POLICY_BUCKET, Prefix=POLICY_KEY, MaxKeys=30).get("Versions", [])
+    s3 = aws("s3")
+    vs = s3.list_object_versions(Bucket=POLICY_BUCKET, Prefix=POLICY_KEY, MaxKeys=30).get("Versions", [])
     out = []
     for v in sorted((v for v in vs if v["Key"] == POLICY_KEY), key=lambda v: v["LastModified"], reverse=True)[:30]:
-        head = _aws("s3").head_object(Bucket=POLICY_BUCKET, Key=POLICY_KEY, VersionId=v["VersionId"])
+        head = s3.head_object(Bucket=POLICY_BUCKET, Key=POLICY_KEY, VersionId=v["VersionId"])
         out.append({"version_id": v["VersionId"], "saved_at": v["LastModified"].isoformat(timespec="seconds"),
                     "by": head.get("Metadata", {}).get("updated-by"), "current": v.get("IsLatest", False)})
     return out
@@ -114,101 +113,24 @@ def history_version(version_id):
     if POLICY_FILE:
         i = int(version_id.split("-", 1)[1])
         with open(POLICY_FILE + ".history.jsonl") as f:
-            return guard_core.normalize_policy(json.loads(f.readlines()[i]))
-    return load_policy(version_id)[0]
+            policy = guard_core.normalize_policy(json.loads(f.readlines()[i]))
+    else:
+        policy = load_policy(version_id)[0]
+    current, _ = load_policy()
+    return {"policy": policy, "changes": monitoring.policy_changes(current, policy)}  # what loading it would change
 
-
-# ---------- test & stats ----------
 
 def run_test(text, policy, lang="en"):
     policy = guard_core.normalize_policy(policy, lang)
     items = [{"source": "test", "text": text[:MAX_TEST_CHARS]}]
     if LOCAL_DECIDER_URL or not GUARD_FUNCTION:
         return guard_core.check_many(items, LOCAL_DECIDER_URL, policy, lang)
-    resp = _aws("lambda").invoke(FunctionName=GUARD_FUNCTION,
-                                 Payload=json.dumps({"items": items, "policy": policy, "dry_run": True, "client": "console", "lang": lang}).encode())
+    resp = aws("lambda").invoke(FunctionName=GUARD_FUNCTION, Payload=json.dumps(
+        {"items": items, "policy": policy, "dry_run": True, "client": "console", "lang": lang}).encode())
     out = json.load(resp["Payload"])
     if resp.get("FunctionError"):
         raise RuntimeError(out.get("errorMessage", "guard error"))
     return out
-
-
-def stats(hours):
-    if AUDIT_LOG:
-        return _local_stats(hours)
-    logs = _aws("logs")
-    end = int(time.time())
-    start = end - hours * 3600
-    queries = {
-        "by_decision": "filter ispresent(decision) and client != 'status' | stats count(*) as n by decision",
-        "by_category": "filter decision != 'allow' | stats count(*) as n by categories | sort n desc | limit 20",
-        "by_client": "filter ispresent(decision) | stats count(*) as n by client | sort n desc | limit 10",
-        "recent": "filter decision != 'allow' | sort @timestamp desc | limit 25 | fields @timestamp, decision, client, sources, categories, ms",
-    }
-    ids = {k: logs.start_query(logGroupName=GUARD_LOG_GROUP, startTime=start, endTime=end, queryString=q)["queryId"] for k, q in queries.items()}
-    results = {}
-    deadline = time.time() + 20
-    while ids and time.time() < deadline:
-        time.sleep(0.7)
-        for k in list(ids):
-            r = logs.get_query_results(queryId=ids[k])
-            if r["status"] in ("Complete", "Failed", "Cancelled", "Timeout"):
-                results[k] = [{f["field"]: f["value"] for f in row if not f["field"].startswith("@ptr")} for row in r.get("results", [])]
-                del ids[k]
-    for k in ids:
-        results[k] = []
-    counts = {r.get("decision"): int(r.get("n", 0)) for r in results["by_decision"]}
-    return {
-        "hours": hours,
-        "total": sum(counts.values()), "block": counts.get("block", 0), "ask": counts.get("ask", 0),
-        "by_category": _split_counts(results["by_category"], "categories"),
-        "by_client": [{"key": r.get("client") or "-", "n": int(r.get("n", 0))} for r in results["by_client"]],
-        "recent": [{"ts": (r.get("@timestamp") or "").replace(" ", "T") + "Z", "decision": r.get("decision"), "client": r.get("client"),
-                    "sources": r.get("sources"), "categories": r.get("categories"), "ms": r.get("ms")} for r in results["recent"]],
-        "partial": bool(ids),
-    }
-
-
-def _split_counts(rows, field):
-    """'contact,health' rows -> per-category counts."""
-    agg = {}
-    for r in rows:
-        for c in (r.get(field) or "").split(","):
-            if c:
-                agg[c] = agg.get(c, 0) + int(r.get("n", 0))
-    return [{"key": k, "n": n} for k, n in sorted(agg.items(), key=lambda kv: -kv[1])]
-
-
-def _local_stats(hours):
-    since = dt.datetime.now() - dt.timedelta(hours=hours)
-    rows = []
-    try:
-        with open(AUDIT_LOG) as f:
-            for line in f:
-                try:
-                    e = json.loads(line)
-                    if dt.datetime.fromisoformat(e["ts"]) >= since:
-                        rows.append(e)
-                except (ValueError, KeyError):
-                    continue
-    except FileNotFoundError:
-        pass
-    cat = {p: c for p, c in guard_core.CATEGORY_OF_PATTERN.items()} | dict(guard_core.CATEGORY_OF_KIND)
-    def cats(e):
-        return ",".join(sorted({cat.get(t, t) for t in e.get("types", [])}))
-    blocked = [e for e in rows if e["decision"] != "allow"]
-    by_client = {}
-    for e in rows:
-        by_client[e["agent"]] = by_client.get(e["agent"], 0) + 1
-    return {
-        "hours": hours, "total": len(rows),
-        "block": sum(e["decision"] == "block" for e in rows), "ask": sum(e["decision"] == "ask" for e in rows),
-        "by_category": _split_counts([{"categories": cats(e), "n": 1} for e in blocked], "categories"),
-        "by_client": [{"key": k, "n": n} for k, n in sorted(by_client.items(), key=lambda kv: -kv[1])],
-        "recent": [{"ts": e["ts"], "decision": e["decision"], "client": e["agent"], "sources": ",".join(e.get("sources", [])),
-                    "categories": cats(e), "ms": e.get("ms")} for e in sorted(blocked, key=lambda e: e["ts"], reverse=True)[:25]],
-        "partial": False,
-    }
 
 
 # ---------- HTTP ----------
@@ -223,10 +145,50 @@ def _user(event):
     return claims.get("email") or claims.get("cognito:username") or "local-admin"
 
 
+def _hours(q, default):
+    return max(1, min(int(q.get("hours", default)), 24 * 30))
+
+
+def route(method, path, body, q, user, lang):
+    if path == "/api/policy" and method == "GET":
+        policy, version = load_policy()
+        return {"policy": policy, "version_id": version, "meta": meta(lang)}
+    if path == "/api/policy" and method == "PUT":
+        policy, version = save_policy(body.get("policy"), user, lang)
+        return {"policy": policy, "version_id": version}
+    if path == "/api/test" and method == "POST":
+        text = str(body.get("text") or "")
+        if not text.strip():
+            raise ValueError(MESSAGES[lang]["no_text"])
+        return run_test(text, body.get("policy"), lang)
+    if path == "/api/history" and method == "GET":
+        return {"versions": history()}
+    if path.startswith("/api/history/") and method == "GET":
+        return history_version(path.rsplit("/", 1)[1])
+    if path == "/api/overview" and method == "GET":
+        return monitoring.overview(_hours(q, "24"), load_policy()[0])
+    if path == "/api/logs" and method == "GET":
+        return monitoring.decision_log(q)
+    if path == "/api/activity" and method == "GET":
+        return monitoring.admin_activity(_hours(q, "168"))
+    if path == "/api/alerts" and method == "GET":
+        return alerts.status()
+    if path == "/api/alerts" and method == "PUT":
+        cfg, changes = alerts.save(body.get("alerts"))
+        audit("alerts_saved", user, changes)
+        return alerts.status()
+    if path == "/api/alerts/test" and method == "POST":
+        alerts.send_test(user)
+        audit("alert_test", user)
+        return {"sent": True}
+    return None
+
+
 def handler(event, context=None):
+    if event.get("health_check"):  # EventBridge schedule
+        return alerts.health_check()
     method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
     lang = guard_core.lang_of((event.get("headers") or {}).get("x-lang"))
-    msg = MESSAGES[lang]
     path = event.get("rawPath", "")
     raw = event.get("body") or ""
     if event.get("isBase64Encoded"):
@@ -234,29 +196,12 @@ def handler(event, context=None):
     try:
         body = json.loads(raw) if raw else {}
     except ValueError:
-        return _resp(400, {"error": msg["bad_json"]})
+        return _resp(400, {"error": MESSAGES[lang]["bad_json"]})
     try:
-        if path == "/api/policy" and method == "GET":
-            policy, version = load_policy()
-            return _resp(200, {"policy": policy, "version_id": version, "meta": meta(lang)})
-        if path == "/api/policy" and method == "PUT":
-            policy, version = save_policy(body.get("policy"), _user(event), lang)
-            return _resp(200, {"policy": policy, "version_id": version})
-        if path == "/api/test" and method == "POST":
-            text = str(body.get("text") or "")
-            if not text.strip():
-                return _resp(400, {"error": msg["no_text"]})
-            return _resp(200, run_test(text, body.get("policy"), lang))
-        if path == "/api/history" and method == "GET":
-            return _resp(200, {"versions": history()})
-        if path.startswith("/api/history/") and method == "GET":
-            return _resp(200, {"policy": history_version(path.rsplit("/", 1)[1])})
-        if path == "/api/stats" and method == "GET":
-            hours = int((event.get("queryStringParameters") or {}).get("hours", "24"))
-            return _resp(200, stats(max(1, min(hours, 24 * 30))))
-        return _resp(404, {"error": "not found"})
+        out = route(method, path, body, event.get("queryStringParameters") or {}, _user(event), lang)
+        return _resp(200, out) if out is not None else _resp(404, {"error": "not found"})
     except ValueError as e:
         return _resp(400, {"error": str(e)})
     except Exception as e:
         print(json.dumps({"error": repr(e)[:500], "path": path}))
-        return _resp(500, {"error": msg["server"].format(e=str(e)[:200])})
+        return _resp(500, {"error": MESSAGES[lang]["server"].format(e=str(e)[:200])})

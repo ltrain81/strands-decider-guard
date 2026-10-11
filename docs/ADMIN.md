@@ -16,6 +16,19 @@ The console lets anyone, developer or not, decide what the guard blocks. Saved c
   - Policies saved here go to `~/.decider-guard/policy.json`, which local-mode hooks (`make local`) read immediately.
 - **Language:** use the **EN / 한국어** toggle in the header. The default follows the browser; add `?lang=ko` to a link to force one.
 
+## Overview tab
+
+The first screen: is the guard working, and what is it doing?
+
+- **Health:** the guard (can it reach the model, which model and device), the GPU host (running or stopped),
+  the policy (when and by whom it was last saved) and alerts (how many rules are on, and which are in alarm).
+- **Numbers for the period** (1 hour to 30 days): checks, blocked and asked (with their share of all checks),
+  p95 latency, and guard errors.
+- **Charts:** decisions over time (allowed / asked / blocked) and latency (median and p95). Hover a chart to see
+  the values for each time bucket.
+- **Breakdowns:** why things were blocked (by information type or custom rule) and which tools sent the checks.
+- **Latest blocks and asks**, with a link to the full log. "Auto-refresh" reloads the tab every minute.
+
 ## Policy tab
 
 ### Sensitivity
@@ -79,15 +92,40 @@ When "You have unsaved changes" appears at the bottom, click **Save and apply**.
   "Health / medical (model: sensitive 97%, specific person 65%)".
 - Tested text is not logged and does not count in Activity.
 
-## Activity tab
+## Logs tab
 
-- Checks, blocks and asks for the last 24 hours, 7 days or 30 days, broken down by information type and by tool.
-- Recent blocks show the time, tool, target (e.g. `file:customers.csv`) and reason. **No text is stored anywhere.**
-- On AWS the numbers come from CloudWatch Logs Insights and take a few seconds.
+- **Decision log:** every check the guard made.
+  - Filter by period, decision, tool, information type (or custom rule) and target. The target is a file name, `prompt`, `bash` and so on.
+  - Click a row for its details, including the request ID for CloudWatch.
+  - **Export CSV** downloads what is on screen.
+  - **No text is stored anywhere:** the log holds the decision, tool, target, types, size and latency.
+- **Admin activity:** who saved the policy or changed alerts, and exactly what changed.
+  For example "Sensitivity: Balanced → Strict" or "Rule added: Project Atlas".
+- On AWS this reads CloudWatch Logs, which can take a few seconds for long periods.
+
+## Alerts tab
+
+AWS only. Alerts email people when the guard needs attention.
+
+- **Recipients:**
+  - Add email addresses. AWS sends each new address a confirmation email, and alerts start after the recipient clicks "Confirm subscription".
+  - The status shows *Waiting for confirmation* until then.
+- **Rules**, each switched on or off, with a live state (OK / In alarm / Waiting for data):
+
+| Rule | Fires when | Default |
+|---|---|---|
+| Guard down | the 5-minute health check cannot reach the model for 10 minutes | on |
+| Guard errors | the guard Lambda returns an error | on |
+| Block spike | more than *N* blocks in 5 minutes | off, N = 20 |
+| Slow checks | p95 latency above *N* ms for 10 minutes | off, N = 3000 |
+
+- **Send test notification** checks that the emails arrive.
+- A stopped GPU host (`make stop`) triggers *Guard down*. Turn that rule off first if you stop the host on purpose.
 
 ## History tab
 
 - Every save is a version, with who saved it and when.
+- **Compare** shows what loading that version would change.
 - To roll back, click **Load**, review the policy on the Policy tab, then click **Save and apply**.
 
 ## Good to know

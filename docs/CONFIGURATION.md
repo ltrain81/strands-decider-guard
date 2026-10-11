@@ -120,8 +120,19 @@ Guard Lambda environment:
 Outputs in `outputs.json`:
 - `GuardFunctionName`, `GuardFunctionArn`, `InvokePolicyArn`, `Region`
 - `DeciderInstanceId`
-- `AdminUrl`, `AdminUserPoolId`, `PolicyBucketName`
+- `AdminUrl`, `AdminUserPoolId`, `PolicyBucketName`, `AlertsTopicArn`, `AlarmPrefix`
 - `Console*` (used by `ctl.sh publish-console`)
+
+Monitoring and alerts (created by the stack, configured from the console's Alerts tab):
+
+| Resource | What |
+|---|---|
+| Metric filters `DeciderGuard/Blocks`, `Asks`, `Checks` | counts from the guard log (used by the "block spike" alarm) |
+| EventBridge rule (every 5 min) | calls the admin Lambda's health check, which publishes `DeciderGuard/GuardHealthy` |
+| SNS topic | alert emails; recipients subscribe from the console |
+| CloudWatch alarms `<stack>-guard_down`, `-guard_errors`, `-block_spike`, `-latency` | created and updated by the admin Lambda, not CloudFormation, so thresholds change without a redeploy. `destroy.sh` deletes them |
+
+None of these needs an extra IAM role. The admin Lambda's role gets the SNS, CloudWatch alarm/metric, EC2 describe and Logs Insights permissions.
 
 ## Local decider
 
