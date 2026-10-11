@@ -77,12 +77,16 @@ if [ -f "$HOME/.decider-guard/config.json" ]; then
 fi
 
 step "Recommended next step"
-AG="$(IFS=,; echo "${AGENTS[*]:-}")"
-if [ ${#AGENTS[@]} -eq 0 ]; then
+KIRO_NOTE=""
+REC=()
+for a in "${AGENTS[@]:-}"; do [ "$a" = kiro ] && KIRO_NOTE=1 || { [ -n "$a" ] && REC+=("$a"); }; done
+AG="$(IFS=,; echo "${REC[*]:-}")"
+[ -n "$KIRO_NOTE" ] && warn "Kiro CLI found: it can only block tool calls, not prompts, so it is opt-in (add ,kiro to --agents / AGENTS)"
+if [ ${#REC[@]} -eq 0 ] && [ -z "$KIRO_NOTE" ]; then
   echo "  No Claude Code, Kiro CLI or Codex CLI found. Install one first, or use the LiteLLM guardrail (docs/LITELLM.md)."
 elif [ -f "$OUTPUTS" ]; then
   echo "  Install the hooks against your deployment:"
-  echo "    client/install.sh --outputs outputs.json --agents $AG"
+  echo "    client/install.sh --outputs outputs.json --agents ${AG:-kiro}"
 elif [ -n "$AWSOK" ] && [ -n "$NODEOK" ]; then
   echo "  Try it locally first (5 min), then deploy for your team:"
   echo "    make local            # local decider + hooks + console, no AWS"

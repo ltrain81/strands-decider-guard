@@ -33,6 +33,8 @@ MSG = {
     "en": {
         "blocked": "[PII guard] Sensitive data detected; blocked ({where}).",
         "ask": "[PII guard] Possible sensitive data; confirmation needed ({where}).",
+        "unreachable": "[PII guard] Could not reach the guard, so this was blocked (fail_mode=closed) ({where}).",
+        "unreachable_hint": "Check the guard (make health / scripts/local-decider.sh status), or set fail_mode to open in ~/.decider-guard/config.json.",
         "default_hint": "Mask it or leave that data out and try again.",
         "prompt": "prompt", "tool": "tool {tool}", "bash_output": "Bash output",
         "output_hidden": "(the command output was hidden by the PII guard)",
@@ -46,6 +48,8 @@ MSG = {
     "ko": {
         "blocked": "[PII guard] 민감 정보가 감지되어 차단했습니다 ({where}).",
         "ask": "[PII guard] 민감 정보로 의심되어 확인이 필요합니다 ({where}).",
+        "unreachable": "[PII guard] guard 에 연결하지 못해 차단했습니다 (fail_mode=closed) ({where}).",
+        "unreachable_hint": "guard 상태를 확인하거나 (make health / scripts/local-decider.sh status), ~/.decider-guard/config.json 의 fail_mode 를 open 으로 바꾸세요.",
         "default_hint": "마스킹하거나 해당 데이터를 제외하고 다시 시도하세요.",
         "prompt": "프롬프트", "tool": "도구 {tool}", "bash_output": "Bash 출력",
         "output_hidden": "(명령 출력은 PII guard 가 가렸습니다)",
@@ -227,9 +231,11 @@ def audit(entry):
         pass
 
 
-def block_message(cfg, decision, reasons, where, custom=""):
-    lines = [m(cfg, "blocked" if decision == "block" else "ask", where=where)] + [f"  - {r}" for r in reasons[:6]]
-    lines.append(f"  {custom.strip() or m(cfg, 'default_hint')}")
+def block_message(cfg, decision, reasons, where, custom="", unreachable=False):
+    head = "unreachable" if unreachable else "blocked" if decision == "block" else "ask"
+    lines = [m(cfg, head, where=where)] + [f"  - {r}" for r in reasons[:6]]
+    hint = m(cfg, "unreachable_hint") if unreachable else custom.strip() or m(cfg, "default_hint")
+    lines.append(f"  {hint}")
     return "\n".join(lines)
 
 
@@ -287,11 +293,13 @@ def run_hook(agent):
         return 0
 
     t0 = time.time()
+    unreachable = False
     try:
         verdict = call_guard(cfg, items, agent)
         decision, reasons = verdict["decision"], summarize(verdict)
     except Exception as e:
         decision = "block" if cfg["fail_mode"] == "closed" else "allow"
+        unreachable = True
         reasons = [m(cfg, "guard_failed", e=str(e)[:200])]
         if decision == "allow":
             print(m(cfg, "failed_open", e=str(e)[:200]), file=sys.stderr)
@@ -308,7 +316,7 @@ def run_hook(agent):
     audit({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "agent": agent, "event": event, "tool": tool, "decision": decision,
            "types": sorted({f["type"] for r in verdict.get("results", []) for f in r.get("findings", [])}),
            "sources": [i["source"] for i in items], "ms": round((time.time() - t0) * 1000)})
-    return emit(cfg, agent, event, decision, block_message(cfg, decision, reasons, where, verdict.get("message", "")), reasons)
+    return emit(cfg, agent, event, decision, block_message(cfg, decision, reasons, where, verdict.get("message", ""), unreachable), reasons)
 
 
 def main():

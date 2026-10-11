@@ -111,7 +111,7 @@ def codex(install, a):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("action", choices=["install", "uninstall"])
-    p.add_argument("--agents", default="claude,kiro,codex")
+    p.add_argument("--agents", default="claude,codex")
     p.add_argument("--command", default="")
     p.add_argument("--fail-closed", action="store_true")
     p.add_argument("--claude-bedrock", action="store_true")

@@ -4,7 +4,8 @@
 #   client/install.sh --outputs outputs.json                  # after ./deploy.sh (AWS backend)
 #   client/install.sh --function-name NAME --region REGION [--profile P]
 #   client/install.sh --local [--decider-url http://127.0.0.1:8000]   # no AWS: local strands-decider server
-#   options: --agents claude,kiro,codex   only these agents (default: all three; 'none' = just ~/.decider-guard)
+#   options: --agents claude,codex        which agents (default: claude,codex; add kiro to opt in, it can only block
+#                                         tool calls; 'none' = just ~/.decider-guard). --uninstall removes all three
 #            --language en|ko             block-message language (default: from LANG)
 #            --fail-open                  allow (instead of block) when the guard is unreachable
 #            --claude-bedrock [--bedrock-region R]   also point Claude Code at Amazon Bedrock
@@ -14,7 +15,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 DEST="${DECIDER_GUARD_HOME:-$HOME/.decider-guard}"
-BACKEND=lambda FN="" REGION="" PROFILE="" URL="http://127.0.0.1:8000" AGENTS="claude,kiro,codex"
+BACKEND=lambda FN="" REGION="" PROFILE="" URL="http://127.0.0.1:8000" AGENTS="" 
 FAIL=closed BEDROCK="" BEDROCK_REGION="" UNINSTALL="" OUTPUTS="" LANGUAGE=""
 
 while [ $# -gt 0 ]; do
@@ -31,14 +32,14 @@ while [ $# -gt 0 ]; do
     --claude-bedrock) BEDROCK=1 ;;
     --bedrock-region) BEDROCK_REGION="$2"; shift ;;
     --uninstall) UNINSTALL=1 ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
 done
 
 if [ -n "$UNINSTALL" ]; then
-  python3 "$HERE/configure_agents.py" uninstall --agents "$AGENTS"
+  python3 "$HERE/configure_agents.py" uninstall --agents "${AGENTS:-claude,kiro,codex}"
   echo "hooks removed. $DEST was kept (audit.log); delete it with: rm -rf $DEST"
   exit 0
 fi
@@ -72,7 +73,7 @@ json.dump({"backend": "$BACKEND", "function_name": "$FN", "region": "$REGION" or
 EOF
 chmod 600 "$DEST/config.json"
 
-ARGS=(install --agents "$AGENTS" --command "\"$PY\" \"$DEST/decider_guard.py\"")
+ARGS=(install --agents "${AGENTS:-claude,codex}" --command "\"$PY\" \"$DEST/decider_guard.py\"")
 [ "$FAIL" = closed ] && ARGS+=(--fail-closed)
 [ -n "$BEDROCK" ] && ARGS+=(--claude-bedrock --bedrock-region "${BEDROCK_REGION:-${REGION:-us-east-1}}")
 [ -n "$PROFILE" ] && ARGS+=(--profile "$PROFILE")

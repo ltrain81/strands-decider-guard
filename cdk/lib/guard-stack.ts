@@ -206,7 +206,7 @@ export class DeciderGuardStack extends cdk.Stack {
       corsPreflight: {
         allowOrigins: [`https://${dist.distributionDomainName}`],
         allowMethods: [apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.PUT, apigw.CorsHttpMethod.POST],
-        allowHeaders: ['authorization', 'content-type'],
+        allowHeaders: ['authorization', 'content-type', 'x-lang'],
         maxAge: cdk.Duration.hours(1),
       },
     });

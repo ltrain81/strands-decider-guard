@@ -8,7 +8,7 @@
 #   --admin-email E       create a policy-console login (Cognito emails a temporary password)
 #   --no-console          skip the policy console (S3 + CloudFront + Cognito + API; adds one IAM role)
 #   --install-client      also install the hooks on this machine; passes through
-#                         --agents claude,kiro,codex  --claude-bedrock  --bedrock-region R  --fail-open  --language en|ko
+#                         --agents claude,codex[,kiro]  --claude-bedrock  --bedrock-region R  --fail-open  --language en|ko
 #   --preflight-only      run the checks and exit
 #   -y                    do not ask for confirmation
 set -euo pipefail

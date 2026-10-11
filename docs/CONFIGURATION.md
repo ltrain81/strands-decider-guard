@@ -33,7 +33,7 @@ the detection policy is edited in the [policy console](ADMIN.md). This page list
 | `--outputs outputs.json` | Read the guard name and region from a deployment |
 | `--function-name N --region R` | Same, by hand |
 | `--local [--decider-url URL]` | Local backend; needs a running decider (`scripts/local-decider.sh start`) |
-| `--agents claude,kiro,codex` | Which agents to configure (default: all three) |
+| `--agents claude,codex` | Which agents to configure (default `claude,codex`; add `kiro` to opt in — it can block tool calls but not prompts). `--uninstall` removes all three |
 | `--profile P` | AWS profile for calling the guard |
 | `--language en\|ko` | Message language |
 | `--fail-open` | Set `fail_mode: open` |

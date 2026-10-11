@@ -1,10 +1,10 @@
 # Entry points for the common paths. `make` (or `make help`) lists them.
-# Variables: REGION, PROFILE, ADMIN_EMAIL, AGENTS (claude,kiro,codex), LANGUAGE (en|ko), DEPLOY_ARGS, INSTALL_ARGS
+# Variables: REGION, PROFILE, ADMIN_EMAIL, AGENTS (default claude,codex; add kiro to opt in), LANGUAGE (en|ko), DEPLOY_ARGS, INSTALL_ARGS
 
 REGION       ?=
 PROFILE      ?=
 ADMIN_EMAIL  ?=
-AGENTS       ?= claude,kiro,codex
+AGENTS       ?= claude,codex
 LANGUAGE     ?=
 DEPLOY_ARGS  ?=
 INSTALL_ARGS ?=
@@ -62,7 +62,7 @@ destroy: ## delete the AWS deployment (asks for confirmation)
 
 # ---------- both ----------
 uninstall: ## remove the hooks from this machine's agent configs
-	@client/install.sh --uninstall --agents $(AGENTS)
+	@client/install.sh --uninstall --agents claude,kiro,codex
 
 demo: ## run the scripted demo (DEMO_LANG=en|ko)
 	@demo/run_demo.sh

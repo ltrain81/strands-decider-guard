@@ -3,8 +3,8 @@
 [![ci](https://github.com/ltrain81/strands-decider-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/ltrain81/strands-decider-guard/actions/workflows/ci.yml)
 
 **Stop customer PII and secrets before they reach the model.** This puts a small, fast decision model,
-[strands-decider](https://github.com/strands-labs/strands-decider), in front of **Claude Code**, **Kiro CLI**
-and **Codex CLI**, and optionally in your **LiteLLM** proxy. Prompts, file reads, edits and shell commands are
+[strands-decider](https://github.com/strands-labs/strands-decider), in front of **Claude Code** and
+**Codex CLI**, and optionally in your **LiteLLM** proxy. Kiro CLI is opt-in and covers tool calls only. Prompts, file reads, edits and shell commands are
 checked in a few hundred milliseconds. Sensitive ones are blocked, or the user is asked to confirm. Admins manage
 what counts as sensitive in a web console. Most rules are plain-language questions, so admins don't need to write regex.
 
@@ -39,20 +39,21 @@ More detail: [Configuration reference](docs/CONFIGURATION.md) · [Policy console
 
 ## How it works
 
-```text
- Developer machine                                      AWS (your account)                     or: this machine
-┌──────────────────────────────┐  lambda:Invoke (IAM)  ┌───────────────────────────────────┐  ┌─────────────────────┐
-│ Claude Code / Kiro / Codex   │ ────────────────────▶ │ Guard Lambda (in a VPC)           │  │ strands-decider     │
-│  hook: decider_guard.py      │ ◀── allow/ask/block ─ │  1. regex: IDs, cards (Luhn), keys │  │ 127.0.0.1:8000      │
-│  - prompts                   │                       │  2. strands-decider: 4 yes/no and  │  │ (make local)        │
-│  - Read / Write / Edit / Bash│                       │     choice questions + your rules  │  └─────────────────────┘
-│  - Bash output (Claude)      │                       │        │ private IP                │
-└──────────────┬───────────────┘                       │        ▼                           │
-               │ only what passed                      │ EC2 GPU host running the 2B model  │
-               ▼                                       │ Policy: versioned S3, edited in    │
-        Amazon Bedrock (or any model)                  │ the console (CloudFront + Cognito) │
-                                                       └───────────────────────────────────┘
-```
+![Architecture: hooks on the developer machine call a guard Lambda, which asks strands-decider on a GPU host; admins edit the policy in a console](docs/images/architecture.png)
+
+1. The hook sends the prompt, or the tool input and the file it touches, to the guard Lambda (`lambda:Invoke`, IAM-authenticated).
+2. The guard runs the regexes, then makes **one** call to strands-decider on the GPU host over a private IP.
+3. It applies the current policy, read from S3 through a gateway endpoint and cached for 30 s.
+4. It logs only the decision, types and sizes, never the text.
+5. Only what passed reaches the model.
+
+Admins:
+- Ⓐ open the console (CloudFront, Cognito sign-in),
+- Ⓑ save policy versions to S3,
+- Ⓒ see stats computed from the decision log.
+
+The diagram source is [`docs/images/architecture.drawio`](docs/images/architecture.drawio); open it in
+[draw.io](https://app.diagrams.net), which includes the AWS icons.
 
 Each check makes **one** model call. The model reads the text once and answers several questions about it:
 which kind of sensitive data appears, whether it is about a specific person, whether it holds real values
@@ -85,9 +86,10 @@ make demo            # five scripted scenes with Claude Code (DEMO_LANG=ko for K
 make local-console   # policy console at http://127.0.0.1:8770, no login
 ```
 
-- `make local` changes your agent configs: `~/.claude/settings.json`, `~/.kiro/hooks/decider-guard.json` and
-  `~/.codex/hooks.json`. Existing hooks are kept, and each changed file is backed up as `*.bak-decider-guard`.
-  Pick agents with `AGENTS=claude,codex`. Undo with `make uninstall`.
+- `make local` changes your agent configs: `~/.claude/settings.json` and `~/.codex/hooks.json`.
+  Existing hooks are kept, and each changed file is backed up as `*.bak-decider-guard`. Undo with `make uninstall`.
+- **Kiro CLI is opt-in** (`AGENTS=claude,codex,kiro`). Kiro can block tool calls, including reading a file with PII,
+  but not a prompt someone types or pastes.
 - Restart running agent sessions afterwards. **Codex** only runs new hooks after you approve them once with `/hooks`.
 - The device is picked automatically (`mps` on Apple silicon, `cuda` with an NVIDIA GPU, else `cpu`).
   CPU works but takes seconds per check.
@@ -117,7 +119,7 @@ On each teammate's machine:
 
 ```bash
 git clone … && cd strands-decider-guard
-client/install.sh --outputs outputs.json [--profile their-profile] [--agents claude,kiro,codex]
+client/install.sh --outputs outputs.json [--profile their-profile] [--agents claude,codex,kiro]
 ```
 
 - Share `outputs.json` with teammates. It holds no secrets, only names and ARNs.
@@ -127,14 +129,14 @@ client/install.sh --outputs outputs.json [--profile their-profile] [--agents cla
 
 ## What is checked in each agent
 
-| | Claude Code | Kiro CLI | Codex CLI | LiteLLM proxy |
+| | Claude Code | Codex CLI | LiteLLM proxy | Kiro CLI (opt-in) |
 |---|---|---|---|---|
-| Prompt | **block** (prompt not shown to the model) | cannot block. The model is told not to use the values | **block** | **block** (HTTP 400) |
-| File read | Read: content checked first, **deny** | read_file: **deny** | via shell: `cat/head/grep FILE` reads checked | every tool result sent to the model |
-| Write / edit | Write, Edit, MultiEdit, NotebookEdit | fs_write, str_replace | apply_patch (added lines) | — |
-| Shell | command + files it reads; **output is redacted** | command + files it reads | command + files it reads | — |
-| MCP / web | tool input | tool input | tool input | — |
-| "ask" verdict | confirmation dialog | blocks | blocks | blocks (configurable) |
+| Prompt | **block** (prompt not shown to the model) | **block** | **block** (HTTP 400) | cannot block. The model is told not to use the values |
+| File read | Read: content checked first, **deny** | via shell: `cat/head/grep FILE` reads checked | every tool result sent to the model | read_file: **deny** |
+| Write / edit | Write, Edit, MultiEdit, NotebookEdit | apply_patch (added lines) | — | fs_write, str_replace |
+| Shell | command + files it reads; **output is redacted** | command + files it reads | — | command + files it reads |
+| MCP / web | tool input | tool input | — | tool input |
+| "ask" verdict | confirmation dialog | blocks | blocks (configurable) | blocks |
 
 ## Managing the policy
 
@@ -241,7 +243,7 @@ docs/                       configuration, console, LiteLLM, demo recording (Eng
 ## Development
 
 ```bash
-make test         # 27 offline tests (fake model) + shell syntax. CI runs this plus tsc and cdk synth
+make test         # 28 offline tests (fake model) + shell syntax. CI runs this plus tsc and cdk synth
 make test-model   # policy features against a running decider (make local first)
 make eval         # accuracy on the synthetic samples
 ```

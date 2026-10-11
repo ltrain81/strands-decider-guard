@@ -3,8 +3,8 @@
 [![ci](https://github.com/ltrain81/strands-decider-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/ltrain81/strands-decider-guard/actions/workflows/ci.yml)
 
 **고객 PII와 비밀 값이 모델에 닿기 전에 막습니다.** 작고 빠른 판단 모델
-[strands-decider](https://github.com/strands-labs/strands-decider)를 **Claude Code**, **Kiro CLI**, **Codex CLI** 앞단에 둡니다.
-원하면 **LiteLLM** 프록시 안에도 둘 수 있습니다.
+[strands-decider](https://github.com/strands-labs/strands-decider)를 **Claude Code**, **Codex CLI** 앞단에 둡니다.
+원하면 **LiteLLM** 프록시 안에도 둘 수 있습니다. Kiro CLI 는 선택 사항이며 도구 호출만 막을 수 있습니다.
 
 - 프롬프트, 파일 읽기, 편집, 셸 명령을 수백 ms 안에 검사합니다.
 - 민감하면 차단하거나 사용자에게 확인을 받습니다.
@@ -44,20 +44,21 @@ UserPromptSubmit operation blocked by hook:
 
 ## 동작 방식
 
-```text
- 개발자 PC                                               AWS (고객 계정)                         또는: 이 PC
-┌──────────────────────────────┐  lambda:Invoke (IAM)  ┌───────────────────────────────────┐  ┌─────────────────────┐
-│ Claude Code / Kiro / Codex   │ ────────────────────▶ │ Guard Lambda (VPC 안)             │  │ strands-decider     │
-│  hook: decider_guard.py      │ ◀── allow/ask/block ─ │  1. 정규식: 신분증·카드(Luhn)·키    │  │ 127.0.0.1:8000      │
-│  - 프롬프트                    │                       │  2. strands-decider: 질문 4개      │  │ (make local)        │
-│  - Read / Write / Edit / Bash│                       │     + 회사 전용 규칙                │  └─────────────────────┘
-│  - Bash 출력 (Claude)         │                       │        │ private IP                │
-└──────────────┬───────────────┘                       │        ▼                           │
-               │ 통과한 것만                             │ 2B 모델이 도는 EC2 GPU 호스트          │
-               ▼                                       │ 정책: 버전 관리되는 S3, 콘솔에서 편집     │
-        Amazon Bedrock (또는 다른 모델)                   │ (CloudFront + Cognito)             │
-                                                       └───────────────────────────────────┘
-```
+![아키텍처: 개발자 PC 의 hook 이 guard Lambda 를 호출하고, guard 는 GPU 호스트의 strands-decider 에 묻습니다. 관리자는 콘솔에서 정책을 편집합니다](docs/images/architecture.png)
+
+1. hook 이 프롬프트, 또는 도구 입력과 그 도구가 다루는 파일을 guard Lambda 로 보냅니다 (`lambda:Invoke`, IAM 인증).
+2. guard 는 정규식을 먼저 보고, GPU 호스트의 strands-decider 를 private IP 로 **한 번** 호출합니다.
+3. S3 게이트웨이 엔드포인트로 읽은 현재 정책을 적용합니다 (30초 캐시).
+4. 판정, 유형, 크기만 로그로 남기고 원문은 남기지 않습니다.
+5. 통과한 것만 모델로 갑니다.
+
+관리자는:
+- Ⓐ 콘솔을 엽니다 (CloudFront, Cognito 로그인).
+- Ⓑ 정책 버전을 S3 에 저장합니다.
+- Ⓒ 판정 로그로 만든 통계를 봅니다.
+
+다이어그램 원본은 [`docs/images/architecture.drawio`](docs/images/architecture.drawio) 입니다.
+AWS 아이콘이 들어 있는 [draw.io](https://app.diagrams.net) 에서 열어 편집하면 됩니다.
 
 검사 한 번에 모델 호출은 **한 번**입니다. 모델이 텍스트를 한 번 읽고 여러 질문에 답합니다.
 - 어떤 종류의 민감 정보가 있는지
@@ -93,9 +94,10 @@ make demo            # Claude Code 로 다섯 장면 시연 (DEMO_LANG=ko 면 �
 make local-console   # 정책 콘솔 http://127.0.0.1:8770, 로그인 없음
 ```
 
-- `make local` 은 에이전트 설정을 바꿉니다: `~/.claude/settings.json`, `~/.kiro/hooks/decider-guard.json`, `~/.codex/hooks.json`.
-  - 기존 hook 은 그대로 두고, 바꾼 파일은 `*.bak-decider-guard` 로 백업합니다.
-  - `AGENTS=claude,codex` 로 대상 에이전트를 고를 수 있습니다. 되돌리려면 `make uninstall`.
+- `make local` 은 에이전트 설정을 바꿉니다: `~/.claude/settings.json`, `~/.codex/hooks.json`.
+  - 기존 hook 은 그대로 두고, 바꾼 파일은 `*.bak-decider-guard` 로 백업합니다. 되돌리려면 `make uninstall`.
+- **Kiro CLI 는 선택 사항입니다** (`AGENTS=claude,codex,kiro`). PII 가 든 파일 읽기 같은 도구 호출은 막지만,
+  사용자가 입력하거나 붙여 넣은 프롬프트는 막지 못합니다.
 - 실행 중인 에이전트 세션은 다시 시작하세요. **Codex** 는 `/hooks` 에서 새 hook 을 한 번 승인해야 동작합니다.
 - 디바이스는 자동으로 고릅니다. Apple 실리콘은 `mps`, NVIDIA GPU는 `cuda`, 그 외는 `cpu` 입니다.
   CPU 도 동작하지만 검사 한 번에 몇 초 걸립니다.
@@ -129,7 +131,7 @@ make install                                                           # 이 PC 
 
 ```bash
 git clone … && cd strands-decider-guard
-client/install.sh --outputs outputs.json [--profile 팀원-프로필] [--agents claude,kiro,codex]
+client/install.sh --outputs outputs.json [--profile 팀원-프로필] [--agents claude,codex,kiro]
 ```
 
 - `outputs.json` 을 팀원에게 공유하세요. 비밀 정보 없이 이름과 ARN 만 들어 있습니다.
@@ -138,14 +140,14 @@ client/install.sh --outputs outputs.json [--profile 팀원-프로필] [--agents 
 
 ## 에이전트별 검사 범위
 
-| | Claude Code | Kiro CLI | Codex CLI | LiteLLM 프록시 |
+| | Claude Code | Codex CLI | LiteLLM 프록시 | Kiro CLI (선택) |
 |---|---|---|---|---|
-| 프롬프트 | **차단** (모델에 보이지 않음) | 차단 불가. 모델에 그 값을 쓰지 말라고 경고 | **차단** | **차단** (HTTP 400) |
-| 파일 읽기 | Read 전에 내용 검사, **거부** | read_file **거부** | 셸 경유: `cat/head/grep 파일` 의 대상 파일 검사 | 모델에 가는 모든 tool result |
-| 쓰기 / 수정 | Write, Edit, MultiEdit, NotebookEdit | fs_write, str_replace | apply_patch (추가된 줄) | — |
-| 셸 | 명령 + 읽는 파일, **출력도 가림** | 명령 + 읽는 파일 | 명령 + 읽는 파일 | — |
-| MCP / 웹 | 도구 입력 | 도구 입력 | 도구 입력 | — |
-| "확인" 판정 | 확인창 | 차단 | 차단 | 차단 (설정 가능) |
+| 프롬프트 | **차단** (모델에 보이지 않음) | **차단** | **차단** (HTTP 400) | 차단 불가. 모델에 그 값을 쓰지 말라고 경고 |
+| 파일 읽기 | Read 전에 내용 검사, **거부** | 셸 경유: `cat/head/grep 파일` 의 대상 파일 검사 | 모델에 가는 모든 tool result | read_file **거부** |
+| 쓰기 / 수정 | Write, Edit, MultiEdit, NotebookEdit | apply_patch (추가된 줄) | — | fs_write, str_replace |
+| 셸 | 명령 + 읽는 파일, **출력도 가림** | 명령 + 읽는 파일 | — | 명령 + 읽는 파일 |
+| MCP / 웹 | 도구 입력 | 도구 입력 | — | 도구 입력 |
+| "확인" 판정 | 확인창 | 차단 | 차단 (설정 가능) | 차단 |
 
 ## 정책 관리
 
@@ -253,7 +255,7 @@ docs/                       설정, 콘솔, LiteLLM, 데모 촬영 (영문 + .ko
 ## 개발
 
 ```bash
-make test         # 오프라인 테스트 27개 (가짜 모델) + 셸 문법. CI 는 여기에 tsc, cdk synth 를 더 실행
+make test         # 오프라인 테스트 28개 (가짜 모델) + 셸 문법. CI 는 여기에 tsc, cdk synth 를 더 실행
 make test-model   # 실행 중인 decider 로 정책 기능 테스트 (먼저 make local)
 make eval         # 합성 샘플 정확도
 ```

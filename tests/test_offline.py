@@ -230,6 +230,19 @@ class Hook(unittest.TestCase):
         self.assertIn("Resident registration number", json.loads(buf.getvalue())["reason"])
 
 
+    def test_unreachable_guard_says_so(self):
+        with open(os.path.join(self.tmp.name, "config.json"), "w") as f:
+            json.dump({"backend": "local", "decider_url": "http://127.0.0.1:9", "language": "en"}, f)
+        ev = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git log --oneline -20"}})
+        buf = io.StringIO()
+        with mock.patch("sys.stdin", io.StringIO(ev)), redirect_stdout(buf):
+            sys.modules["guard_core"] = g
+            self.h.run_hook("claude")
+        reason = json.loads(buf.getvalue())["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("Could not reach the guard", reason)
+        self.assertNotIn("Sensitive data detected", reason)
+
+
 class ConfigureAgents(unittest.TestCase):
     def run_cfg(self, home, *args):
         env = dict(os.environ, HOME=home)
