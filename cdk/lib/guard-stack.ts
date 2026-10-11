@@ -247,11 +247,8 @@ export class DeciderGuardStack extends cdk.Stack {
     });
     const authorizer = new HttpUserPoolAuthorizer('AdminAuth', pool, { userPoolClients: [client] });
     const integration = new HttpLambdaIntegration('AdminIntegration', adminFn);
-    const routes: [string, apigw.HttpMethod][] = [
-      ['/api/policy', apigw.HttpMethod.GET], ['/api/policy', apigw.HttpMethod.PUT], ['/api/test', apigw.HttpMethod.POST],
-      ['/api/history', apigw.HttpMethod.GET], ['/api/history/{version}', apigw.HttpMethod.GET], ['/api/stats', apigw.HttpMethod.GET],
-    ];
-    for (const [p, m] of routes) api.addRoutes({ path: p, methods: [m], integration, authorizer });
+    // One authorized catch-all route; handler.py does the routing. OPTIONS is left to the CORS preflight above.
+    api.addRoutes({ path: '/api/{proxy+}', methods: [apigw.HttpMethod.GET, apigw.HttpMethod.PUT, apigw.HttpMethod.POST], integration, authorizer });
 
 
     new cdk.CfnOutput(this, 'AdminUrl', { value: consoleUrl });
