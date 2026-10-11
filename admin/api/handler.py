@@ -37,11 +37,17 @@ def _aws(name):
     return _clients[name]
 
 
-def meta():
+MESSAGES = {
+    "en": {"bad_json": "The request body is not valid JSON", "no_text": "Enter some text to check", "server": "Server error: {e}"},
+    "ko": {"bad_json": "JSON 형식이 아닙니다", "no_text": "검사할 텍스트를 입력하세요", "server": "서버 오류: {e}"},
+}
+
+
+def meta(lang):
     return {
-        "categories": [{k: c[k] for k in ("id", "label", "desc")} for c in guard_core.CATEGORIES],
-        "sensitivities": [{"id": k, "label": v} for k, v in guard_core.SENSITIVITY_LABELS.items()],
-        "labels": guard_core.LABELS,
+        "categories": [{"id": c["id"], "label": c["label"][lang], "desc": c["desc"][lang]} for c in guard_core.CATEGORIES],
+        "sensitivities": [{"id": k, "label": v} for k, v in guard_core.SENSITIVITY_LABELS[lang].items()],
+        "labels": guard_core.PATTERN_LABELS[lang],
         "limits": guard_core.LIMITS,
     }
 
@@ -65,8 +71,8 @@ def load_policy(version_id=None):
         return guard_core.normalize_policy(None), None
 
 
-def save_policy(policy, user):
-    policy = guard_core.normalize_policy(policy)
+def save_policy(policy, user, lang="en"):
+    policy = guard_core.normalize_policy(policy, lang)
     policy["updated_at"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     policy["updated_by"] = user
     body = json.dumps(policy, ensure_ascii=False, indent=2).encode()
@@ -114,13 +120,13 @@ def history_version(version_id):
 
 # ---------- test & stats ----------
 
-def run_test(text, policy):
-    policy = guard_core.normalize_policy(policy)
+def run_test(text, policy, lang="en"):
+    policy = guard_core.normalize_policy(policy, lang)
     items = [{"source": "test", "text": text[:MAX_TEST_CHARS]}]
     if LOCAL_DECIDER_URL or not GUARD_FUNCTION:
-        return guard_core.check_many(items, LOCAL_DECIDER_URL, policy)
+        return guard_core.check_many(items, LOCAL_DECIDER_URL, policy, lang)
     resp = _aws("lambda").invoke(FunctionName=GUARD_FUNCTION,
-                                 Payload=json.dumps({"items": items, "policy": policy, "dry_run": True, "client": "console"}).encode())
+                                 Payload=json.dumps({"items": items, "policy": policy, "dry_run": True, "client": "console", "lang": lang}).encode())
     out = json.load(resp["Payload"])
     if resp.get("FunctionError"):
         raise RuntimeError(out.get("errorMessage", "guard error"))
@@ -200,7 +206,7 @@ def _local_stats(hours):
         "by_category": _split_counts([{"categories": cats(e), "n": 1} for e in blocked], "categories"),
         "by_client": [{"key": k, "n": n} for k, n in sorted(by_client.items(), key=lambda kv: -kv[1])],
         "recent": [{"ts": e["ts"], "decision": e["decision"], "client": e["agent"], "sources": ",".join(e.get("sources", [])),
-                    "categories": cats(e), "ms": e.get("ms")} for e in blocked[::-1][:25]],
+                    "categories": cats(e), "ms": e.get("ms")} for e in sorted(blocked, key=lambda e: e["ts"], reverse=True)[:25]],
         "partial": False,
     }
 
@@ -219,6 +225,8 @@ def _user(event):
 
 def handler(event, context=None):
     method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
+    lang = guard_core.lang_of((event.get("headers") or {}).get("x-lang"))
+    msg = MESSAGES[lang]
     path = event.get("rawPath", "")
     raw = event.get("body") or ""
     if event.get("isBase64Encoded"):
@@ -226,19 +234,19 @@ def handler(event, context=None):
     try:
         body = json.loads(raw) if raw else {}
     except ValueError:
-        return _resp(400, {"error": "JSON 형식이 아닙니다"})
+        return _resp(400, {"error": msg["bad_json"]})
     try:
         if path == "/api/policy" and method == "GET":
             policy, version = load_policy()
-            return _resp(200, {"policy": policy, "version_id": version, "meta": meta()})
+            return _resp(200, {"policy": policy, "version_id": version, "meta": meta(lang)})
         if path == "/api/policy" and method == "PUT":
-            policy, version = save_policy(body.get("policy"), _user(event))
+            policy, version = save_policy(body.get("policy"), _user(event), lang)
             return _resp(200, {"policy": policy, "version_id": version})
         if path == "/api/test" and method == "POST":
             text = str(body.get("text") or "")
             if not text.strip():
-                return _resp(400, {"error": "검사할 텍스트를 입력하세요"})
-            return _resp(200, run_test(text, body.get("policy")))
+                return _resp(400, {"error": msg["no_text"]})
+            return _resp(200, run_test(text, body.get("policy"), lang))
         if path == "/api/history" and method == "GET":
             return _resp(200, {"versions": history()})
         if path.startswith("/api/history/") and method == "GET":
@@ -251,4 +259,4 @@ def handler(event, context=None):
         return _resp(400, {"error": str(e)})
     except Exception as e:
         print(json.dumps({"error": repr(e)[:500], "path": path}))
-        return _resp(500, {"error": f"서버 오류: {str(e)[:200]}"})
+        return _resp(500, {"error": msg["server"].format(e=str(e)[:200])})

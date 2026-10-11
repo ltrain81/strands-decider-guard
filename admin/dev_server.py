@@ -44,6 +44,7 @@ class H(http.server.BaseHTTPRequestHandler):
         url = urllib.parse.urlsplit(self.path)
         body = self.rfile.read(int(self.headers.get("content-length") or 0)).decode() if method in ("PUT", "POST") else ""
         event = {"requestContext": {"http": {"method": method}}, "rawPath": url.path, "body": body,
+                 "headers": {k.lower(): v for k, v in self.headers.items()},
                  "queryStringParameters": dict(urllib.parse.parse_qsl(url.query))}
         r = handler.handler(event)
         self._send(r["statusCode"], r["body"].encode())

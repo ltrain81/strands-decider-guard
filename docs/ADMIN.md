@@ -1,79 +1,98 @@
-# 정책 관리 콘솔 사용법
+# Policy console guide
 
-개발자가 아니어도 웹 화면에서 무엇을 막을지 정할 수 있습니다. 저장하면 **30초 안에** 모든 코딩 에이전트에 적용됩니다.
-Claude Code, Kiro, Codex hook 과 LiteLLM 프록시에 모두 적용되며, 재배포는 필요 없습니다.
+[한국어](ADMIN.ko.md)
 
-## 접속
+The console lets anyone, developer or not, decide what the guard blocks. Saved changes reach every coding agent
+(Claude Code, Kiro and Codex hooks) and the LiteLLM guardrail within **30 seconds**, with no redeploy.
 
-- 주소: `./ctl.sh console` 로 확인합니다. 배포가 끝날 때도 출력됩니다.
-- 계정 만들기: `./ctl.sh add-admin 이메일`. 임시 비밀번호가 메일로 오고, 처음 로그인할 때 새 비밀번호를 정합니다.
-  - 배포하면서 바로 만들려면 `./deploy.sh --admin-email 이메일`.
-  - 콘솔 계정과 개발자 PC 의 AWS 권한은 별개입니다. 콘솔에 로그인할 수 있는 사람만 정책을 바꿀 수 있습니다.
-- AWS 없이 내 PC 에서 써 보려면 `admin/dev_server.py` 를 실행합니다(로그인 없음, 127.0.0.1 전용).
-  - 여기서 저장한 정책은 `~/.decider-guard/policy.json` 에 저장됩니다.
-  - 로컬 모드 hook(`client/install.sh --local`)이 이 파일을 바로 읽습니다.
+## Opening it
 
-## 정책 탭
+- **AWS:**
+  - `make console` prints the URL; the deploy prints it too.
+  - Create a login with `make add-admin ADMIN_EMAIL=you@example.com`, or pass `ADMIN_EMAIL=` to `make deploy`.
+    Cognito emails a temporary password, and you choose a new one on first sign-in.
+  - Console logins are separate from AWS access: only people with a login can change the policy.
+- **Local:** `make local-console` opens `http://127.0.0.1:8770`, with no login.
+  - Policies saved here go to `~/.decider-guard/policy.json`, which local-mode hooks (`make local`) read immediately.
+- **Language:** use the **EN / 한국어** toggle in the header. The default follows the browser; add `?lang=ko` to a link to force one.
 
-### 기본 민감도
-| 선택 | 이럴 때 | 합성 샘플에서 관찰된 동작 |
+## Policy tab
+
+### Sensitivity
+
+| Choice | When | What we saw on synthetic samples |
 |---|---|---|
-| 관대 | 오탐 때문에 업무가 막히는 게 더 큰 문제일 때 | 짧은 건강 정보 문장, 운전면허번호 문장 일부를 놓침 |
-| **보통 (권장)** | 대부분의 경우 | 놓친 것 없음. `SELECT name, email ...` 같은 SQL 은 "확인" |
-| 엄격 | 금융·의료처럼 놓치면 안 될 때 | 놓친 것 없음. 마스킹 예시(`010-XXXX-XXXX`)와 SQL 은 "확인" |
+| Lenient | false alarms that block work are the bigger problem | missed some short health and driver's-license sentences |
+| **Balanced (recommended)** | most teams | missed nothing; SQL such as `SELECT name, email …` gets **ask** |
+| Strict | finance, healthcare: missing something is worse | missed nothing; masking examples (`010-XXXX-XXXX`) and SQL get **ask** |
 
-### 정보 유형별 동작
-각 유형마다 **차단 / 확인 / 허용** 중 하나를 고릅니다.
-- **차단**: 에이전트가 그 내용을 읽거나 쓰거나 모델에 보내지 못합니다.
-- **확인**: Claude Code 는 사용자에게 "계속할까요?" 를 묻습니다. 사용자 확인을 지원하지 않는 Kiro, Codex, LiteLLM 은 차단합니다.
-- **허용**: 그 유형은 검사하지 않습니다.
+### Actions by information type
 
-"주민·외국인등록번호"는 번호 형식으로 찾습니다. AI 모델의 신분증 판단은 "신분증 번호" 설정을 따르므로, 둘을 같이 바꾸는 것이 자연스럽습니다.
+Pick **Block**, **Ask** or **Allow** for each type:
+- **Block:** the agent cannot read, write or send it to the model.
+- **Ask:** Claude Code asks the user "continue?". Kiro, Codex and LiteLLM cannot ask, so they block.
+- **Allow:** the type is not checked.
 
-### 우리 회사만의 규칙
-막고 싶은 내용을 **예/아니오로 답할 수 있는 질문**으로 적습니다. 정규식이나 키워드 목록이 아니라, AI 모델이 매번 이 질문으로 판단합니다.
+"Resident registration number" is found by its format. The model's own ID judgement follows "Government ID",
+so change the two together.
 
-좋은 질문의 예:
-- 사내 프로젝트 'Phoenix(피닉스)'의 미공개 일정, 매출, 출시 계획이 포함되어 있나요?
-- 직원의 급여, 연봉, 인사 평가 정보가 포함되어 있나요?
-- 고객사와의 계약 금액이나 계약 조건이 포함되어 있나요?
+### Your own rules
 
-잘 쓰는 법:
-- **한 질문에 한 주제**를 다룹니다. 여러 주제를 섞으면 판단이 흐려집니다.
-- **다른 표기도 함께** 적습니다. 예: `Phoenix(피닉스)`. 한글 표기만 쓴 문장을 놓친 경우가 있었습니다.
-- 막고 싶은 것을 **구체적으로** 씁니다. "회사 기밀이 있나요?" 보다 "미공개 출시 일정이 있나요?" 가 정확합니다.
-- 규칙마다 따로 민감도를 줄 수 있습니다. 놓치면 안 되는 규칙은 "엄격" 으로 둡니다.
-- 저장 전에 **테스트 탭**에서 막혀야 할 문장과 통과해야 할 문장을 하나씩 넣어 봅니다.
+Write what you want to stop as a **question that can be answered yes or no**. There are no regexes or keyword
+lists: the model answers your question on every check.
 
-규칙은 최대 20개입니다. 규칙이 늘어도 검사 시간은 크게 늘지 않습니다. 같은 텍스트에 질문만 추가되기 때문입니다.
+Good questions:
+- Does the text include unreleased schedules, revenue or launch plans for project 'Phoenix' (PHX)?
+- Does the text include an employee's salary, compensation or performance review?
+- Does the text include contract amounts or terms agreed with a customer?
 
-### 예외 (허용 목록)
-- **이메일 도메인**: 회사 도메인을 넣으면 그 도메인 주소는 검사 전에 지워집니다.
-- **무시할 단어**: 테스트용 가짜 이름(`홍길동`), 대표번호 같은 값을 넣습니다.
+Tips:
+- **One topic per question.** Mixing topics blurs the answer.
+- **Include other spellings and code names**, e.g. `Phoenix (PHX)` or `Phoenix(피닉스)`. In our tests a sentence that
+  used only the Korean spelling was missed.
+- **Be specific.** "Unreleased launch dates?" works better than "anything confidential?".
+- Each rule has its own sensitivity: set rules you must not miss to **Strict**.
+- Before saving, use the **Test** tab: try one sentence that should be blocked and one that should pass.
 
-예외 값은 텍스트에서 지워진 뒤에 검사됩니다. 예를 들어 `홍길동` 을 예외로 넣으면 "홍길동 환자는 우울증 치료 중" 문장은 **특정인이 없는 문장**이 되어 통과합니다. 실제 사람 이름은 넣지 마세요.
+Up to 20 rules. More rules add almost no latency, because they are extra questions about text the model has already read.
 
-### 차단 안내 문구
-차단될 때 개발자에게 보이는 문구입니다. 문의 채널을 적어 두면 좋습니다.
+### Exceptions (allowlist)
 
-### 저장
-화면 아래에 "저장하지 않은 변경이 있습니다" 가 뜨면 **저장하고 적용**을 누릅니다. **되돌리기**는 마지막 저장 상태로 돌아갑니다.
+- **Email domains:** addresses in these domains (e.g. your company's) are removed before checking.
+- **Words to ignore:** fake test names (`Jane Doe`), a public support number, and so on.
 
-## 테스트 탭
-- 문장을 넣고 **검사하기**를 누르면 **저장하지 않은 현재 설정**으로 판정합니다.
-- 결과는 차단 / 확인 필요 / 허용 중 하나이고, 이유가 함께 나옵니다. 예: "건강·의료 정보 (AI 판단: 민감 정보 97%, 특정인 65%)".
-- 테스트한 문장은 기록되지 않고 통계에도 들어가지 않습니다.
+Allowlisted values are removed from the text before it is checked. With `Jane Doe` allowlisted,
+"Jane Doe is treated for depression" no longer names a person, so it passes. **Do not add real people's names.**
 
-## 활동 탭
-- 최근 24시간, 7일, 30일 동안의 전체 검사·차단·확인 건수를 봅니다. 정보 유형별, 도구별로도 나눠 봅니다.
-- 최근 차단 목록은 시각, 도구, 대상(예: `file:customers.csv`), 사유만 보여 줍니다. **원문은 어디에도 저장되지 않습니다.**
-- 집계는 CloudWatch Logs Insights 로 계산하므로 몇 초 걸릴 수 있습니다.
+### Block message
 
-## 변경 이력 탭
-- 저장할 때마다 버전이 남고, 누가 언제 저장했는지 보입니다.
-- **불러오기** → 정책 탭에서 내용 확인 → **저장하고 적용** 순서로 예전 설정으로 되돌립니다.
+Shown to developers when something is blocked. A good place for your support channel.
 
-## 알아 둘 점
-- 정책은 각 판정 요청에서 읽고 30초 캐시합니다. 저장 직후 30초 동안은 이전 정책이 적용될 수 있습니다.
-- 정책 파일을 읽지 못하면 guard 는 **마지막으로 읽은 정책을 계속 적용**합니다. 정책이 없으면 기본값(전부 차단, 보통)을 씁니다.
-- 판정 품질은 합성 샘플 수십 개로만 확인했습니다. 실제 업무 문장으로 테스트 탭에서 꼭 확인하세요.
+### Saving
+
+When "You have unsaved changes" appears at the bottom, click **Save and apply**. **Discard** returns to the last saved policy.
+
+## Test tab
+
+- Paste text and click **Check**. It uses the **current, unsaved** settings.
+- The result is Blocked, Needs confirmation or Allowed, with the reasons, e.g.
+  "Health / medical (model: sensitive 97%, specific person 65%)".
+- Tested text is not logged and does not count in Activity.
+
+## Activity tab
+
+- Checks, blocks and asks for the last 24 hours, 7 days or 30 days, broken down by information type and by tool.
+- Recent blocks show the time, tool, target (e.g. `file:customers.csv`) and reason. **No text is stored anywhere.**
+- On AWS the numbers come from CloudWatch Logs Insights and take a few seconds.
+
+## History tab
+
+- Every save is a version, with who saved it and when.
+- To roll back, click **Load**, review the policy on the Policy tab, then click **Save and apply**.
+
+## Good to know
+
+- The guard caches the policy for 30 seconds, so the old policy may apply for up to 30 seconds after a save.
+- If the guard cannot read the policy, it **keeps enforcing the last policy it read**. With no policy at all, it uses
+  the defaults: every type blocked, balanced sensitivity.
+- Quality was checked on a few dozen synthetic sentences. Use the Test tab with real examples from your own work.

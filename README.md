@@ -1,174 +1,253 @@
 # strands-decider-guard
 
-Claude Code / Kiro CLI / Codex CLI 앞단에 [strands-decider](https://github.com/strands-labs/strands-decider)를 붙여,
-**고객 개인정보(PII)·비밀 값이 LLM으로 넘어가기 전에 차단**하는 데모입니다. 모델 판단은 AWS(GPU EC2)에서 돌고,
-각 개발자 PC에는 hook 하나만 설치합니다.
+[![ci](https://github.com/ltrain81/strands-decider-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/ltrain81/strands-decider-guard/actions/workflows/ci.yml)
 
+**Stop customer PII and secrets before they reach the model.** This puts a small, fast decision model,
+[strands-decider](https://github.com/strands-labs/strands-decider), in front of **Claude Code**, **Kiro CLI**
+and **Codex CLI**, and optionally in your **LiteLLM** proxy. Prompts, file reads, edits and shell commands are
+checked in a few hundred milliseconds. Sensitive ones are blocked, or the user is asked to confirm. Admins manage
+what counts as sensitive in a web console. Most rules are plain-language questions, so admins don't need to write regex.
+
+[한국어 README](README.ko.md)
+
+```text
+> Write SQL to look up the customer with resident number 900101-1234567
+
+UserPromptSubmit operation blocked by hook:
+[PII guard] Sensitive data detected; blocked (prompt).
+  - [prompt] Resident registration number pattern found (900********567)
+  Mask it or leave that data out and try again.
 ```
- 개발자 PC                                        AWS (고객 계정, 기본 ap-northeast-2)
-┌────────────────────────────┐   lambda:Invoke   ┌──────────────────────────────────────────────┐
-│ Claude Code / Kiro / Codex │ ───(IAM, SigV4)──▶│ Guard Lambda (VPC)                           │
-│   hook: decider_guard.py   │                   │  1) regex: 주민번호·카드(Luhn)·AWS 키 → 즉시 차단  │
-│   - 프롬프트                 │ ◀── allow/ask/block│  2) strands-decider 질문 3개 (choice + yes/no) │
-│   - Read/Write/Edit/Bash   │                   │        │ private IP :8000                    │
-│   - Bash 출력 (Claude)      │                   │        ▼                                     │
-└────────────┬───────────────┘                   │ EC2 g6.xlarge (L4) strands-decider 2B         │
-             │ 통과한 것만                         │  (인바운드는 Lambda SG 에서만)                   │
-             ▼                                   └──────────────────────────────────────────────┘
-   Amazon Bedrock (Claude / Codex 모델)
+
+## Contents
+
+- [How it works](#how-it-works)
+- [Choose your path](#choose-your-path)
+- [Quick start: local, no AWS](#quick-start-local-no-aws)
+- [Quick start: AWS for a team](#quick-start-aws-for-a-team)
+- [What is checked in each agent](#what-is-checked-in-each-agent)
+- [Managing the policy](#managing-the-policy)
+- [Operations and cost](#operations-and-cost)
+- [Accuracy and latency](#accuracy-and-latency)
+- [Limitations](#limitations)
+- [Troubleshooting](#troubleshooting)
+- [Repository layout](#repository-layout)
+- [Development](#development)
+
+More detail: [Configuration reference](docs/CONFIGURATION.md) · [Policy console guide](docs/ADMIN.md) ·
+[LiteLLM](docs/LITELLM.md) · [Recording a demo](docs/DEMO_VIDEO.md)
+
+## How it works
+
+```text
+ Developer machine                                      AWS (your account)                     or: this machine
+┌──────────────────────────────┐  lambda:Invoke (IAM)  ┌───────────────────────────────────┐  ┌─────────────────────┐
+│ Claude Code / Kiro / Codex   │ ────────────────────▶ │ Guard Lambda (in a VPC)           │  │ strands-decider     │
+│  hook: decider_guard.py      │ ◀── allow/ask/block ─ │  1. regex: IDs, cards (Luhn), keys │  │ 127.0.0.1:8000      │
+│  - prompts                   │                       │  2. strands-decider: 4 yes/no and  │  │ (make local)        │
+│  - Read / Write / Edit / Bash│                       │     choice questions + your rules  │  └─────────────────────┘
+│  - Bash output (Claude)      │                       │        │ private IP                │
+└──────────────┬───────────────┘                       │        ▼                           │
+               │ only what passed                      │ EC2 GPU host running the 2B model  │
+               ▼                                       │ Policy: versioned S3, edited in    │
+        Amazon Bedrock (or any model)                  │ the console (CloudFront + Cognito) │
+                                                       └───────────────────────────────────┘
 ```
 
-문서:
-- [정책 관리 콘솔](docs/ADMIN.md): 비개발자도 웹 화면에서 차단 기준, 회사 전용 규칙, 예외를 관리
-- [LiteLLM 을 쓰는 고객](docs/LITELLM.md): 프록시 guardrail 로 서버 측에서 강제하는 방법
-- [데모 영상 촬영 가이드](docs/DEMO_VIDEO.md)
+Each check makes **one** model call. The model reads the text once and answers several questions about it:
+which kind of sensitive data appears, whether it is about a specific person, whether it holds real values
+(not field names or placeholders), plus each of your custom rules. Clear-cut patterns, such as a resident
+registration number or a valid card number, are blocked by regex without calling the model.
+Reasons always show **masked** values, and nothing logs the original text.
 
-## 정책은 화면에서 관리
+## Choose your path
 
-규칙을 코드로 하나씩 고치는 대신, **정책 관리 콘솔**(CloudFront + Cognito 로그인)에서 정합니다. 사용법은 [docs/ADMIN.md](docs/ADMIN.md) 에 있습니다.
-
-- 정보 유형별(주민번호, 카드·계좌, 연락처, 건강정보, 비밀번호 등) 차단 / 확인 / 허용
-- 민감도: 관대 / 보통 / 엄격
-- **회사 전용 규칙을 질문 문장으로 작성**: 예) "사내 프로젝트 'Phoenix(피닉스)'의 미공개 일정이 있나요?" decider 가 그 질문으로 판단하므로 정규식이 필요 없습니다.
-- 예외 목록(회사 이메일 도메인, 테스트용 이름), 차단 안내 문구
-- 저장 전 테스트, 최근 활동(원문 없이 건수와 사유만), 변경 이력과 되돌리기
-
-저장하면 30초 안에 모든 hook 과 LiteLLM guardrail 에 적용됩니다(S3 버전 관리 + Lambda 캐시).
-AWS 없이 써 보려면 `admin/dev_server.py` 를 실행합니다. 로컬 모드 hook 과 연동됩니다.
-
-## 무엇을 막나
-
-| 단계 | Claude Code | Kiro CLI | Codex CLI |
+| You want to… | Path | Needs | Time |
 |---|---|---|---|
-| 프롬프트 제출 | **차단** (원문 비노출) | 차단 불가 → 모델에 "값을 쓰지 말라" 경고 주입 | **차단** |
-| 파일 읽기 | Read 전에 파일 내용 검사 → **거부** | read_file 전 검사 → **거부** | (전용 도구 없음) `cat/head/grep x` 대상 파일 검사 |
-| 파일 쓰기/수정 | Write/Edit 내용 검사 | fs_write/str_replace 검사 | apply_patch 추가 줄 검사 |
-| 셸 | 명령 + 읽는 파일 검사, **출력도 검사 후 가림** | 명령 + 읽는 파일 | 명령 + 읽는 파일 |
-| MCP / Web | 입력 검사 | 입력 검사 | 입력 검사 |
+| See it work on your laptop | [Local](#quick-start-local-no-aws) | Python 3.10+ (uv recommended); a Mac with Apple silicon or an NVIDIA GPU is fastest | ~10 min (first model download ~4 GB) |
+| Protect a team's agents | [AWS](#quick-start-aws-for-a-team) | AWS credentials, Node 18+, AWS CLI v2, GPU instance quota | ~25 min |
+| Enforce it in a LiteLLM proxy (cannot be bypassed by the user) | [LiteLLM](docs/LITELLM.md) | either of the above | +10 min |
+| Let non-developers manage the rules | [Policy console](docs/ADMIN.md) | deployed with either path (local: no login) | — |
 
-판정은 세 단계입니다.
-- **block**: 강한 패턴(주민/외국인등록번호, Luhn 통과 카드번호, AWS 키, 개인키) 또는 decider 가 "민감 유형 + 실제 값"이라고 판단.
-- **ask**: 애매한 경우. Claude Code 도구 호출은 사용자 확인창, 프롬프트는 차단하되 `#pii-ok` 로 시작하면 통과.
-- **allow**: 나머지. 스키마(`CREATE TABLE ... phone`), 마스킹(`010-XXXX-XXXX`), 통계, 코드 변수명은 통과.
-
-모든 사유는 **마스킹된 값만** 보여 주고, Lambda 로그와 로컬 `~/.decider-guard/audit.log` 에는 원문 없이 판정·유형·지연시간만 남깁니다.
-
-## 빠른 시작
-
-필요: AWS 자격 증명(배포 계정), Node 18+, Python 3.9+, AWS CLI v2.
+Not sure? Run the read-only check. It inspects your OS and GPU, tools, AWS credentials and the agents you
+have installed, then prints the recommended next command:
 
 ```bash
-git clone <this repo> && cd strands-decider-guard
-./deploy.sh --region ap-northeast-2 --admin-email you@example.com --install-client   # 배포 + 콘솔 계정 + 이 PC hook
-# Claude Code 를 Bedrock 으로 쓰도록 같이 설정:  --claude-bedrock --bedrock-region us-west-2
+git clone https://github.com/ltrain81/strands-decider-guard && cd strands-decider-guard
+make doctor
 ```
 
-다른 개발자 PC 에는:
+## Quick start: local, no AWS
 
 ```bash
-client/install.sh --outputs outputs.json [--profile dev] [--agents claude,codex]
+make local           # installs + starts strands-decider on 127.0.0.1:8000, installs the hooks (local mode)
+make demo            # five scripted scenes with Claude Code (DEMO_LANG=ko for Korean)
+make local-console   # policy console at http://127.0.0.1:8770, no login
 ```
-- 개발자 IAM 사용자/역할에 출력값 `InvokePolicyArn` 정책을 붙여야 합니다(`lambda:InvokeFunction` 하나).
-- Codex 는 처음 실행 시 `/hooks` 에서 새 hook 을 **Trust** 해야 동작합니다.
-- 제거: `client/install.sh --uninstall`. 기존 hook(다른 도구의 것)은 그대로 두고, 바꾼 파일은 `*.bak-decider-guard` 로 백업합니다.
 
-AWS 없이 로컬에서 먼저 보고 싶으면 (Mac 에서 strands-decider 서버를 `127.0.0.1:8000` 에 띄운 상태):
+- `make local` changes your agent configs: `~/.claude/settings.json`, `~/.kiro/hooks/decider-guard.json` and
+  `~/.codex/hooks.json`. Existing hooks are kept, and each changed file is backed up as `*.bak-decider-guard`.
+  Pick agents with `AGENTS=claude,codex`. Undo with `make uninstall`.
+- Restart running agent sessions afterwards. **Codex** only runs new hooks after you approve them once with `/hooks`.
+- The device is picked automatically (`mps` on Apple silicon, `cuda` with an NVIDIA GPU, else `cpu`).
+  CPU works but takes seconds per check.
+
+Try it yourself in `demo/en` (all data is synthetic):
 
 ```bash
-client/install.sh --local
+cd demo/en && claude
+> Read customers.csv and tell me how many customers there are     # denied: SSN, emails, phones
+> Summarize support_ticket.txt                                     # denied: a named person's health data, no regex hit
+> Summarize architecture.md                                        # allowed: mentions "contact fields", holds no values
 ```
 
-## 데모 시나리오 (`demo/`)
-
-녹화용 스크립트 재생은 `demo/run_demo.sh`, 오른쪽 판정 로그 창은 `demo/watch_audit.sh` 입니다. 촬영 방법은 [docs/DEMO_VIDEO.md](docs/DEMO_VIDEO.md) 를 보세요.
+## Quick start: AWS for a team
 
 ```bash
-cd demo && claude
+make preflight REGION=us-east-1                                   # read-only: credentials, GPU quota, IAM headroom
+make deploy    REGION=us-east-1 ADMIN_EMAIL=you@example.com       # ~6 min stack + ~10 min first model load
+make install                                                      # hooks on this machine, using outputs.json
 ```
-1. `주민등록번호 900101-1234567 고객 가입 이력 조회 SQL 짜줘` → 프롬프트 차단 (모델 호출 없음)
-2. `customers.csv 읽고 고객 수 알려줘` → Read 거부: 주민번호·이메일·휴대폰 패턴 (마스킹된 근거 표시)
-3. `support_ticket.txt 요약해줘` → Read 거부: 정규식에 걸리는 값이 없는데도 decider 가 "건강 정보 + 특정인" 으로 판단
-4. `architecture.md 한 줄 요약` → 통과 ("customer contact fields" 를 언급하지만 실제 값은 없음)
-5. `cat customers.csv | head -2` 를 실행하라고 해 보기 → Bash 도 대상 파일을 검사해 거부
 
-`tail -f ~/.decider-guard/audit.log` 를 옆에 띄워 두면 판정과 지연시간이 실시간으로 보입니다.
+The deploy creates a GPU host (default `g6.xlarge`) running strands-decider, a guard Lambda in the same VPC,
+a versioned S3 bucket for the policy, and the policy console (CloudFront, Cognito login, HTTP API).
+It ends with a smoke test and prints the console URL. Cognito emails the admin a temporary password.
 
-## 운영
+On each teammate's machine:
 
 ```bash
-./ctl.sh health    # Lambda → decider 상태 (모델, 디바이스)
-./ctl.sh stop      # GPU 인스턴스 정지 (비용 절감). fail_mode=closed 면 그동안 프롬프트가 막힘
-./ctl.sh start
-./ctl.sh logs      # SSM 으로 설치 로그 / 서비스 로그
-./destroy.sh       # 스택 전체 삭제 (스택 이름 입력 확인)
+git clone … && cd strands-decider-guard
+client/install.sh --outputs outputs.json [--profile their-profile] [--agents claude,kiro,codex]
 ```
 
-탐지 기준(유형별 동작, 민감도, 회사 규칙, 예외, 안내 문구)은 정책 관리 콘솔에서 바꿉니다. `./ctl.sh console` 로 주소를 확인하고, `./ctl.sh add-admin 이메일` 로 계정을 추가합니다.
+- Share `outputs.json` with teammates. It holds no secrets, only names and ARNs.
+- Teammates' IAM identities need the **`InvokePolicyArn`** managed policy from the outputs, which grants
+  `lambda:InvokeFunction` on the guard and nothing else.
+- To point Claude Code at Amazon Bedrock at the same time, add `--claude-bedrock --bedrock-region us-west-2`.
 
-클라이언트 설정은 `~/.decider-guard/config.json`:
-- `fail_mode`: `closed`(기본, guard 에 닿지 않으면 차단) / `open`.
-- `override_token`: `ask` 판정 프롬프트를 통과시키는 접두어.
-- `max_file_bytes`: 파일 검사 상한.
+## What is checked in each agent
 
-긴 텍스트 샘플링 수는 Lambda 환경 변수 `GUARD_MAX_CHUNKS` 로 조정합니다.
+| | Claude Code | Kiro CLI | Codex CLI | LiteLLM proxy |
+|---|---|---|---|---|
+| Prompt | **block** (prompt not shown to the model) | cannot block. The model is told not to use the values | **block** | **block** (HTTP 400) |
+| File read | Read: content checked first, **deny** | read_file: **deny** | via shell: `cat/head/grep FILE` reads checked | every tool result sent to the model |
+| Write / edit | Write, Edit, MultiEdit, NotebookEdit | fs_write, str_replace | apply_patch (added lines) | — |
+| Shell | command + files it reads; **output is redacted** | command + files it reads | command + files it reads | — |
+| MCP / web | tool input | tool input | tool input | — |
+| "ask" verdict | confirmation dialog | blocks | blocks | blocks (configurable) |
 
-## 비용 (ap-northeast-2, 대략)
+## Managing the policy
 
-| 항목 | 비용 |
+The console has four tabs:
+- **Policy:** sensitivity (lenient / balanced / strict) and block / ask / allow for each information type
+  (resident ID, government ID, card/bank, contact, health, credentials).
+  Also **your own rules written as yes/no questions**, e.g. "Does the text include unreleased launch plans for project
+  Phoenix (PHX)?", an allowlist (company email domains, fake test names) and the message shown when something is blocked.
+- **Test:** check sample text against unsaved settings.
+- **Activity:** counts and recent blocks. No text is ever stored.
+- **History:** every saved version, with rollback.
+
+Saved changes reach every hook and the LiteLLM guardrail within 30 seconds; nothing is redeployed.
+Guide: [docs/ADMIN.md](docs/ADMIN.md). Local: `make local-console`. AWS: `make console`, plus `make add-admin ADMIN_EMAIL=…` to add logins.
+
+The console UI and block messages are available in English and Korean. They follow the browser and system
+language by default; set them with `--language en|ko` (hooks) or the toggle (console).
+
+## Operations and cost
+
+```bash
+make status | make health      # instance state, guard -> model health
+make stop   | make start       # pause the GPU host when nobody needs it (the main cost)
+./ctl.sh logs                  # host setup and service logs via SSM
+make destroy                   # delete everything (asks you to type the stack name)
+```
+
+| Item | Approximate cost |
 |---|---|
-| EC2 g6.xlarge (L4 24GB) | $0.99/시간 (상시 가동 시 월 약 $720). 데모 후 `./ctl.sh stop` 또는 `./destroy.sh` |
-| EBS gp3 100GB | 월 약 $9 (정지 중에도 과금) |
-| 퍼블릭 IPv4 | 월 약 $3.6 |
-| Lambda / CloudWatch / API Gateway / CloudFront / Cognito / S3 | 데모 규모에서는 거의 0 (Cognito 는 MAU 무료 구간) |
+| GPU host `g6.xlarge` (NVIDIA L4) | ~$0.80/h in us-east-1, ~$0.99/h in ap-northeast-2. Stop it when idle |
+| EBS gp3 100 GB | ~$8–9/month, also billed while the host is stopped |
+| Public IPv4 for the host (no NAT gateway is created) | ~$3.6/month |
+| Lambda, API Gateway, CloudFront, Cognito, S3, CloudWatch | near zero at team scale |
 
-CPU 인스턴스는 `--instance-type c7i.2xlarge` 처럼 바꿀 수 있습니다. 다만 CPU 지연시간은 측정하지 않았고 GPU 보다 수 배 느릴 것으로 예상합니다.
+With `make stop` the hooks can't reach the guard. In `fail_mode: closed`, the default, they block until
+`make start`. See [Configuration](docs/CONFIGURATION.md) for `fail_mode: open`.
 
-## 정확도 (합성 데이터, 로컬 Mac MPS 측정)
+## Accuracy and latency
 
-재현:
-- `tests/test_policy.py [--holdout] [--sensitivity=strict] [decider_url]`
-- 정책 기능: `tests/test_policy_features.py`
+Measured on synthetic samples with the balanced preset:
+`make eval` runs [`tests/eval_accuracy.py`](tests/eval_accuracy.py) on the 30 tuning and 20 holdout samples.
 
-| 민감도 | 튜닝 세트 `samples.py` (30) | 홀드아웃 `holdout.py` (20) |
+| Sensitivity | Tuning set (30) | Holdout set (20) |
 |---|---|---|
-| 관대 | 놓침 2 (짧은 건강 정보 문장) | 놓침 1 (운전면허번호) |
-| **보통** | 전부 맞음 | 오탐 1: `SELECT name, email ...` 이 "확인" |
-| 엄격 | 오탐 1: 마스킹 예시가 "확인" | 오탐 1: SQL 이 "확인" |
+| Lenient | 2 misses (short health sentences) | 1 miss (driver's license number) |
+| **Balanced** | all correct | 1 over-trigger: `SELECT name, email FROM users …` is "ask" |
+| Strict | 1 over-trigger: a masking example is "ask" | 1 over-trigger: the same SQL is "ask" |
 
-- 임계값은 튜닝 세트로 정했습니다.
-  - AWS 스모크 테스트에서 놓친 "홍길동 환자는 우울증 치료 중..." 문장을 보고 **"특정인을 지칭하는가"** 질문을 추가했습니다.
-  - 그 과정에서 홀드아웃의 SQL 점수도 봤기 때문에, 홀드아웃이 완전히 독립적이지는 않습니다.
-- 판정 하나에 decider 호출 1회가 듭니다(질문 4개 + 회사 규칙 수). 중간값은 MPS 약 220ms 입니다.
-  - AWS(hook → Lambda → GPU)는 Claude Code 실측 기준 hook 1회당 0.3–0.65초였습니다.
-  - 강한 패턴은 모델 호출 없이 1ms 이하입니다.
-- 회사 규칙(한국어 질문)은 10개 문장 중 9개를 맞혔습니다. 한글 표기 "피닉스" 만 쓴 문장을 놓쳤고, 그래서 다른 표기를 함께 쓰라고 안내합니다.
-- 샘플이 수십 개뿐이라 실제 성능을 대표하지 않습니다. 콘솔의 테스트 탭에서 실제 업무 문장으로 확인하세요.
+- The thresholds were tuned on the tuning set. While adding the "specific person" question, the holdout SQL
+  score was also visible, so treat the holdout as not fully independent.
+- Custom rules written in Korean were right on 9 of 10 sentences.
+- **Latency:** about 200–300 ms per check with the model on an Apple-silicon Mac. End to end through
+  hook → Lambda → GPU, Claude Code saw 0.3–0.65 s per hook. Regex-only blocks take under 1 ms.
+- These are a few dozen synthetic sentences, not a benchmark. Check your own data on the console's Test tab
+  before relying on it.
 
-## 한계 (데모로서 알고 있어야 할 것)
+## Limitations
 
-- **hook 은 클라이언트 측 통제**라서 사용자가 끌 수 있습니다. 조직 강제는 Claude Code 관리형 설정(`/Library/Application Support/ClaudeCode/managed-settings.json` + `allowManagedHooksOnly`)으로 배포하세요.
-- Kiro CLI 는 프롬프트를 막을 수 없고, Codex 는 hook 실패·타임아웃 시 통과(fail-open)합니다.
-- **LiteLLM 프록시를 쓰는 고객**은 `litellm/decider_guardrail.py` 로 서버 측에서 강제할 수 있습니다. 같은 Lambda 를 호출하고, tool result(읽은 파일 내용)까지 검사합니다. 자세한 내용은 [docs/LITELLM.md](docs/LITELLM.md).
-- Claude Code 의 Grep 결과나 `@파일` 참조처럼 hook 이 보지 못하는 경로가 있습니다. 서버 측 백스톱으로 **Bedrock Guardrails** 를 함께 쓰는 것을 권장합니다. 가드레일 버전을 만든 뒤 Claude Code 설정에 넣습니다:
-  `"env": {"ANTHROPIC_CUSTOM_HEADERS": "X-Amzn-Bedrock-GuardrailIdentifier: <id>\nX-Amzn-Bedrock-GuardrailVersion: 1"}`
-- 긴 파일은 1,500자 청크 최대 16개를 고르게 샘플링해서 검사합니다. 정규식은 전체(최대 256KB)를 봅니다.
-- decider 서버는 인증이 없어서 Lambda SG 에서만 접근하도록 막았습니다. 동시 요청 처리 특성은 upstream 에서도 검증되지 않았습니다.
-- `deciderRef` 는 strands-decider main 의 특정 커밋에 고정되어 있고(`cdk/cdk.json`), GPU AMI 는 배포 시점 최신 DLAMI 를 씁니다.
+- **Client hooks are not enforcement.** A user can remove them. For enforcement:
+  - Ship them via Claude Code managed settings (`managed-settings.json` + `allowManagedHooksOnly`).
+  - Put the [LiteLLM guardrail](docs/LITELLM.md) in front of the models.
+  - Or use Bedrock Guardrails as a server-side backstop:
+    `ANTHROPIC_CUSTOM_HEADERS="X-Amzn-Bedrock-GuardrailIdentifier: <id>\nX-Amzn-Bedrock-GuardrailVersion: 1"`.
+- **Gaps in the hooks:**
+  - Kiro CLI cannot block prompts.
+  - Codex treats hook failures and timeouts as "allow".
+  - Claude Code's Grep results and `@file` mentions are not seen by the hooks.
+- Long inputs are sampled: up to 16 chunks of 1,500 characters. The regexes still scan the whole text (up to 256 KB per file).
+- The decider server has no authentication. Only the guard Lambda's security group can reach it. Its behaviour
+  under concurrent requests is not documented upstream.
+- The model is English-first. Korean text and Korean rules worked in our tests; check other languages before relying on them.
 
-## 구조
+## Troubleshooting
 
+| Symptom | Fix |
+|---|---|
+| Every prompt is blocked with "check failed" | The guard is unreachable: `make health`. A stopped host needs `make start`. For local mode, run `scripts/local-decider.sh status`. To allow while it is down, set `fail_mode: open` in `~/.decider-guard/config.json` |
+| `make deploy`: GPU quota is 0 | Service Quotas → EC2 → *Running On-Demand G and VT instances*: request at least 4 vCPUs. Or use `--instance-type` with a type you have quota for |
+| `Cannot exceed quota for RolesPerAccount` | Your account is at the IAM role limit. The stack adds 2 roles (3 with the console), and CDK bootstrap adds 5 once. Free some roles, request an increase, or use `DEPLOY_ARGS=--no-console` |
+| `CREATE_FAILED … Invalid rule description` or other CloudFormation errors | Re-run `make deploy`. A stack in `ROLLBACK_COMPLETE` is recreated automatically |
+| Codex ignores the hooks | Approve them once: start `codex` and run `/hooks`, or choose "Trust all" at startup |
+| Kiro shows the prompt to the model anyway | Expected: Kiro CLI cannot block prompts. Tool calls are still blocked |
+| Too many false positives | On the console's Test tab, try "Lenient", add allowlist entries, or set noisy types to "ask" |
+| The hooks are too slow | Use a GPU (AWS or a Mac with Apple silicon). The first call after idle also pays Lambda and model warm-up |
+| I want to remove everything | `make uninstall` on each machine, then `make destroy` |
+
+## Repository layout
+
+```text
+Makefile                    entry points (make help)
+deploy.sh ctl.sh destroy.sh AWS deploy / operate / delete
+scripts/                    doctor.sh, local-decider.sh, lib.sh (shared helpers)
+guard/guard_core.py         the engine: regex + decider + policy. Shared by the Lambda, console and local mode
+guard/lambda_handler.py     guard Lambda entry point (policy from S3, 30 s cache)
+client/                     decider_guard.py (one hook for all three agents), install.sh, configure_agents.py
+admin/                      policy console: web/index.html, api/handler.py, dev_server.py (local, no login)
+litellm/                    LiteLLM proxy guardrail + example config
+cdk/                        CDK app (TypeScript): VPC, GPU host, Lambdas, S3, CloudFront, Cognito, API
+demo/                       synthetic data (en/, ko/), run_demo.sh, watch_audit.sh
+tests/                      test_offline.py (CI), test_with_model.py, eval_accuracy.py, samples
+docs/                       configuration, console, LiteLLM, demo recording (English + .ko.md)
 ```
-deploy.sh / ctl.sh / destroy.sh   배포·운영 스크립트
-cdk/                               CDK (TypeScript): VPC, EC2 GPU host, Guard Lambda, 정책 S3, 콘솔(CloudFront/Cognito/API)
-guard/guard_core.py                판정 엔진 (regex + decider + 편집 가능한 정책). Lambda·콘솔·로컬 모드가 같은 코드를 씀
-guard/lambda_handler.py            Lambda 진입점
-client/decider_guard.py            Claude/Kiro/Codex 공용 hook
-client/install.sh                  hook 설치·제거 (configure_agents.py 가 각 설정 파일을 병합)
-admin/web/index.html               정책 관리 콘솔 (단일 HTML, 의존성 없음)
-admin/api/handler.py               콘솔 API (정책 저장/이력/테스트/통계)
-admin/dev_server.py                로그인 없이 로컬에서 콘솔 실행
-litellm/                           LiteLLM 프록시용 guardrail 과 예시 config
-demo/                              가짜 고객 데이터, 녹화용 run_demo.sh, 판정 로그 뷰어 watch_audit.sh
-docs/                              LiteLLM 연동, 데모 영상 촬영 가이드
-tests/                             합성 샘플과 정책 테스트
+
+## Development
+
+```bash
+make test         # 27 offline tests (fake model) + shell syntax. CI runs this plus tsc and cdk synth
+make test-model   # policy features against a running decider (make local first)
+make eval         # accuracy on the synthetic samples
 ```
+
+The engine is `guard/guard_core.py`, stdlib only. The Lambda, the console API, the local hook mode and the LiteLLM
+guardrail all import it, so a change there applies everywhere. User-facing strings live in `TEXT` / `MSG` /
+`I18N` tables (English and Korean). Add a language by adding a column to each.
+
+strands-decider is pinned to a commit (`deciderRef` in `cdk/cdk.json`). Both the AWS host and `make local` use it.

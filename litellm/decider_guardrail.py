@@ -22,6 +22,7 @@ config.yaml:
         # decider_url: http://10.0.0.12:8000   (backend: http; guard_core.py must sit next to this file)
         block_on_ask: true
         fail_mode: closed          # closed: reject when the guard is unreachable
+        language: en               # en | ko (error messages and reasons)
 """
 import asyncio
 import hashlib
@@ -33,6 +34,12 @@ from fastapi import HTTPException
 from litellm.integrations.custom_guardrail import CustomGuardrail
 
 SEVERITY = {"allow": 0, "ask": 1, "block": 2}
+MESSAGES = {
+    "en": {"blocked": "Sensitive data was detected and the request was blocked. Mask or remove it and try again.",
+           "unavailable": "guard unavailable"},
+    "ko": {"blocked": "민감 정보가 감지되어 요청을 차단했습니다. 마스킹하거나 해당 데이터를 제외하고 다시 시도하세요.",
+           "unavailable": "guard 에 연결할 수 없습니다"},
+}
 
 
 def _texts_from_content(content) -> list:
@@ -104,13 +111,15 @@ def _has_tool_result(m) -> bool:
 
 class DeciderGuardrail(CustomGuardrail):
     def __init__(self, backend: str = "lambda", function_name: Optional[str] = None, region: Optional[str] = None,
-                 decider_url: Optional[str] = None, block_on_ask: Any = True, fail_mode: str = "closed", **kwargs):
+                 decider_url: Optional[str] = None, block_on_ask: Any = True, fail_mode: str = "closed",
+                 language: str = "en", **kwargs):
         self.backend = backend
         self.function_name = function_name
         self.region = region
         self.decider_url = decider_url
         self.block_on_ask = str(block_on_ask).lower() not in ("false", "0", "no")
         self.fail_mode = fail_mode
+        self.language = "ko" if language == "ko" else "en"
         self._passed = OrderedDict()   # sha256 -> None, LRU of texts that already passed
         self._lambda = None
         super().__init__(**kwargs)
@@ -119,12 +128,12 @@ class DeciderGuardrail(CustomGuardrail):
     def _check_sync(self, items):
         if self.backend == "http":
             import guard_core
-            return guard_core.check_many(items, self.decider_url)
+            return guard_core.check_many(items, self.decider_url, lang=self.language)
         if self._lambda is None:
             import boto3
             from botocore.config import Config
             self._lambda = boto3.client("lambda", region_name=self.region, config=Config(read_timeout=30, retries={"max_attempts": 2}))
-        resp = self._lambda.invoke(FunctionName=self.function_name, Payload=json.dumps({"items": items, "client": "litellm"}).encode())
+        resp = self._lambda.invoke(FunctionName=self.function_name, Payload=json.dumps({"items": items, "client": "litellm", "lang": self.language}).encode())
         out = json.load(resp["Payload"])
         if resp.get("FunctionError"):
             raise RuntimeError(out.get("errorMessage", str(out)))
@@ -150,7 +159,7 @@ class DeciderGuardrail(CustomGuardrail):
             verdict = await asyncio.to_thread(self._check_sync, [it for _, it in fresh])
         except Exception as e:
             if self.fail_mode == "closed":
-                raise HTTPException(status_code=503, detail={"error": f"[PII guard] guard unavailable: {str(e)[:200]}"})
+                raise HTTPException(status_code=503, detail={"error": f"[PII guard] {MESSAGES[self.language]['unavailable']}: {str(e)[:200]}"})
             return data
         decision = verdict["decision"]
         if decision == "ask" and not self.block_on_ask:
@@ -161,7 +170,7 @@ class DeciderGuardrail(CustomGuardrail):
             return data
         reasons = [f"[{r['source']}] {x}" for r in verdict.get("results", []) if r["decision"] != "allow" for x in r.get("reasons", [])]
         raise HTTPException(status_code=400, detail={
-            "error": "[PII guard] 민감 정보가 감지되어 요청을 차단했습니다. 마스킹하거나 해당 데이터를 제외하고 다시 시도하세요.",
+            "error": f"[PII guard] {verdict.get('message') or MESSAGES[self.language]['blocked']}",
             "decision": verdict["decision"],
             "reasons": reasons[:8],
         })

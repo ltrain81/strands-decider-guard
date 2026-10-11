@@ -6,7 +6,6 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
-import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
@@ -45,9 +44,10 @@ export class DeciderGuardStack extends cdk.Stack {
     lambdaSg.addEgressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'guard Lambda to S3 gateway endpoint');
 
     // Versioned policy store edited by the admin console; every save is a version (history + rollback).
+    // No autoDeleteObjects: that adds a custom-resource IAM role; destroy.sh empties the bucket instead.
     const policyBucket = new s3.Bucket(this, 'PolicyBucket', {
       versioned: true, enforceSSL: true, blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      encryption: s3.BucketEncryption.S3_MANAGED, removalPolicy: cdk.RemovalPolicy.DESTROY, autoDeleteObjects: true,
+      encryption: s3.BucketEncryption.S3_MANAGED, removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
     const role = new iam.Role(this, 'DeciderRole', {
@@ -122,7 +122,9 @@ export class DeciderGuardStack extends cdk.Stack {
       statements: [new iam.PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [fn.functionArn] })],
     });
 
-    this.adminConsole(fn, guardLogs, policyBucket);
+    if (this.node.tryGetContext('console') !== 'false' && this.node.tryGetContext('console') !== false) {
+      this.adminConsole(fn, guardLogs, policyBucket);
+    }
 
     new cdk.CfnOutput(this, 'GuardFunctionName', { value: fn.functionName });
     new cdk.CfnOutput(this, 'GuardFunctionArn', { value: fn.functionArn });
@@ -131,11 +133,14 @@ export class DeciderGuardStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'Region', { value: this.region });
   }
 
-  /** Policy console: S3 + CloudFront static site, Cognito login, HTTP API -> admin Lambda. */
+  /**
+   * Policy console: S3 + CloudFront static site, Cognito login, HTTP API -> admin Lambda.
+   * Adds exactly one IAM role (the admin Lambda's). The site files are uploaded by `ctl.sh publish-console`.
+   */
   private adminConsole(guardFn: lambda.Function, guardLogs: logs.LogGroup, policyBucket: s3.Bucket) {
     const site = new s3.Bucket(this, 'ConsoleSite', {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL, enforceSSL: true, encryption: s3.BucketEncryption.S3_MANAGED,
-      removalPolicy: cdk.RemovalPolicy.DESTROY, autoDeleteObjects: true,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
     const dist = new cloudfront.Distribution(this, 'ConsoleCdn', {
       defaultRootObject: 'index.html',
@@ -213,19 +218,13 @@ export class DeciderGuardStack extends cdk.Stack {
     ];
     for (const [p, m] of routes) api.addRoutes({ path: p, methods: [m], integration, authorizer });
 
-    new s3deploy.BucketDeployment(this, 'ConsoleFiles', {
-      destinationBucket: site,
-      distribution: dist,
-      distributionPaths: ['/*'],
-      sources: [
-        s3deploy.Source.asset(path.join(ROOT, 'admin', 'web')),
-        s3deploy.Source.jsonData('config.json', {
-          mode: 'cognito', apiBase: api.apiEndpoint, cognitoDomain: domain.baseUrl(), clientId: client.userPoolClientId, redirectUri: consoleUrl,
-        }),
-      ],
-    });
 
     new cdk.CfnOutput(this, 'AdminUrl', { value: consoleUrl });
+    new cdk.CfnOutput(this, 'ConsoleBucketName', { value: site.bucketName });
+    new cdk.CfnOutput(this, 'ConsoleDistributionId', { value: dist.distributionId });
+    new cdk.CfnOutput(this, 'ConsoleApiUrl', { value: api.apiEndpoint });
+    new cdk.CfnOutput(this, 'ConsoleLoginDomain', { value: domain.baseUrl() });
+    new cdk.CfnOutput(this, 'ConsoleClientId', { value: client.userPoolClientId });
     new cdk.CfnOutput(this, 'AdminUserPoolId', { value: pool.userPoolId });
     new cdk.CfnOutput(this, 'PolicyBucketName', { value: policyBucket.bucketName });
   }

@@ -1,100 +1,151 @@
 #!/usr/bin/env bash
-# Deploy the strands-decider PII guard to AWS (GPU EC2 running strands-decider + guard Lambda),
-# wait until the model is loaded, smoke-test it, and optionally install the agent hooks locally.
+# Deploy the guard to AWS: GPU EC2 running strands-decider, guard Lambda, policy store and the policy
+# console. Runs preflight checks first, waits for the model, smoke-tests, and can install local hooks.
 #
-#   ./deploy.sh [--profile P] [--region R] [--instance-type g6.xlarge] [-y]
-#               [--admin-email you@example.com]   (creates a console login; Cognito emails a temporary password)
-#               [--install-client [--agents claude,kiro,codex] [--claude-bedrock [--bedrock-region R]] [--fail-open]]
+#   ./deploy.sh --region us-east-1 [--profile P] [--admin-email you@example.com] [-y]
+#
+#   --instance-type T     GPU host type (default from cdk/cdk.json: g6.xlarge)
+#   --admin-email E       create a policy-console login (Cognito emails a temporary password)
+#   --no-console          skip the policy console (S3 + CloudFront + Cognito + API; adds one IAM role)
+#   --install-client      also install the hooks on this machine; passes through
+#                         --agents claude,kiro,codex  --claude-bedrock  --bedrock-region R  --fail-open  --language en|ko
+#   --preflight-only      run the checks and exit
+#   -y                    do not ask for confirmation
 set -euo pipefail
+source "$(dirname "$0")/scripts/lib.sh"
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-PROFILE="" REGION="" IT="" YES="" INSTALL="" ADMIN_EMAIL="" CLIENT_ARGS=()
+PROFILE="" REGION="" IT="" YES="" INSTALL="" ADMIN_EMAIL="" CONSOLE=true ONLY_CHECK="" CLIENT_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --profile) PROFILE="$2"; shift ;;
     --region) REGION="$2"; shift ;;
     --instance-type) IT="$2"; shift ;;
     --admin-email) ADMIN_EMAIL="$2"; shift ;;
+    --no-console) CONSOLE=false ;;
+    --preflight-only) ONLY_CHECK=1 ;;
     -y|--yes) YES=1 ;;
     --install-client) INSTALL=1 ;;
-    --agents|--bedrock-region) CLIENT_ARGS+=("$1" "$2"); shift ;;
+    --agents|--bedrock-region|--language) CLIENT_ARGS+=("$1" "$2"); shift ;;
     --claude-bedrock|--fail-open) CLIENT_ARGS+=("$1") ;;
-    -h|--help) sed -n '2,7p' "$0"; exit 0 ;;
-    *) echo "unknown option: $1" >&2; exit 2 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    *) die "unknown option: $1 (see ./deploy.sh --help)" ;;
   esac
   shift
 done
 
-for c in node npm aws python3; do command -v "$c" >/dev/null || { echo "missing required tool: $c" >&2; exit 1; }; done
+# ---------- preflight ----------
+step "Preflight"
+for c in node npm aws python3; do command -v "$c" >/dev/null || die "missing required tool: $c (see README > Prerequisites)"; done
+node -e 'process.exit(+process.versions.node.split(".")[0] >= 18 ? 0 : 1)' || die "Node.js 18+ is required (found $(node --version))"
+ok "tools: node $(node --version), $(aws --version 2>&1 | cut -d' ' -f1), python $(python3 -c 'import platform;print(platform.python_version())')"
 [ -n "$PROFILE" ] && export AWS_PROFILE="$PROFILE"
-REGION="${REGION:-$(aws configure get region || true)}"
-[ -n "$REGION" ] || { echo "no region: pass --region" >&2; exit 1; }
-export AWS_REGION="$REGION" AWS_DEFAULT_REGION="$REGION"
-ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
+use_region "$REGION"
+ACCOUNT="$(aws sts get-caller-identity --query Account --output text 2>/dev/null)" || die "no valid AWS credentials${PROFILE:+ for profile $PROFILE} (try: aws sso login / aws configure)"
 CALLER="$(aws sts get-caller-identity --query Arn --output text)"
-IT="${IT:-$(python3 -c 'import json;print(json.load(open("'"$ROOT"'/cdk/cdk.json"))["context"]["instanceType"])')}"
+ok "AWS account $ACCOUNT, region $AWS_REGION ($CALLER)"
+IT="${IT:-$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["context"]["instanceType"])' "$ROOT/cdk/cdk.json")}"
+
+STACK_EXISTS=""
+aws cloudformation describe-stacks --stack-name "$STACK" >/dev/null 2>&1 && STACK_EXISTS=1
+PROBLEMS=0
+
+if [ -n "$(aws ec2 describe-instance-type-offerings --location-type region --filters Name=instance-type,Values="$IT" --query 'InstanceTypeOfferings[0].InstanceType' --output text 2>/dev/null | grep -v None)" ]; then
+  ok "$IT is offered in $AWS_REGION"
+else
+  fail "$IT is not offered in $AWS_REGION. Pick another region or --instance-type (g5.xlarge, g6.xlarge, g4dn.xlarge)"; PROBLEMS=$((PROBLEMS + 1))
+fi
+
+if [ -z "$STACK_EXISTS" ] && [[ "$IT" == g* ]]; then
+  VCPU="$(aws ec2 describe-instance-types --instance-types "$IT" --query 'InstanceTypes[0].VCpuInfo.DefaultVCpus' --output text 2>/dev/null || echo 4)"
+  QUOTA="$(aws service-quotas get-service-quota --service-code ec2 --quota-code L-DB2E81BA --query 'Quota.Value' --output text 2>/dev/null || echo "?")"
+  if [ "$QUOTA" = "?" ]; then
+    warn "could not read the 'Running On-Demand G and VT instances' quota; make sure it is >= $VCPU vCPUs"
+  elif python3 -c "import sys; sys.exit(0 if float('$QUOTA') >= $VCPU else 1)"; then
+    ok "GPU quota: $QUOTA vCPUs available for G instances (need $VCPU)"
+  else
+    fail "GPU quota is $QUOTA vCPUs, $IT needs $VCPU. Request an increase: Service Quotas > EC2 > 'Running On-Demand G and VT instances'"; PROBLEMS=$((PROBLEMS + 1))
+  fi
+fi
+
+# IAM roles this deploy adds: CDK bootstrap (5, once per account+region), the stack (2, +1 with the console).
+NEED=0
+aws cloudformation describe-stacks --stack-name CDKToolkit >/dev/null 2>&1 || NEED=5
+if [ -n "$STACK_EXISTS" ]; then
+  HAVE="$(aws cloudformation list-stack-resources --stack-name "$STACK" --query "length(StackResourceSummaries[?ResourceType=='AWS::IAM::Role' && ResourceStatus!='DELETE_COMPLETE'])" --output text)"
+else
+  HAVE=0
+fi
+WANT=2; [ "$CONSOLE" = true ] && WANT=3
+NEED=$(( NEED + (WANT > HAVE ? WANT - HAVE : 0) ))
+read -r ROLES ROLE_QUOTA < <(aws iam get-account-summary --query 'SummaryMap.[Roles,RolesQuota]' --output text)
+if [ $(( ROLE_QUOTA - ROLES )) -ge "$NEED" ]; then
+  ok "IAM roles: $ROLES of $ROLE_QUOTA used, this deploy adds $NEED"
+else
+  fail "IAM roles: $ROLES of $ROLE_QUOTA used, this deploy needs $NEED more. Delete unused roles, request a quota increase (Service Quotas > IAM > 'Roles per account'), or deploy with --no-console"
+  PROBLEMS=$((PROBLEMS + 1))
+fi
+
+[ "$PROBLEMS" -eq 0 ] || die "$PROBLEMS preflight check(s) failed; nothing was deployed"
+[ -n "$ONLY_CHECK" ] && { echo; echo "Preflight passed."; exit 0; }
 
 cat <<EOF
-Deploying the decider guard
-  account   $ACCOUNT ($CALLER)
-  region    $REGION
-  instance  $IT  (billed per hour while running; pause it with ./ctl.sh stop)
-  creates   VPC (no NAT), EC2 + 100GB gp3, Lambdas, IAM, CloudWatch logs,
-            policy console (S3 + CloudFront + Cognito + API Gateway)
+
+${B}About to deploy stack $STACK${N}
+  account   $ACCOUNT
+  region    $AWS_REGION
+  GPU host  $IT  (billed per hour while running; pause with ./ctl.sh stop)
+  creates   VPC (no NAT), EC2 + 100 GB gp3, guard Lambda, versioned policy bucket, CloudWatch logs$( [ "$CONSOLE" = true ] && printf '\n            policy console: S3 + CloudFront, Cognito login, HTTP API + admin Lambda' )
 EOF
 if [ -z "$YES" ]; then read -r -p "Continue? [y/N] " a; [ "$a" = y ] || [ "$a" = Y ] || exit 1; fi
 
+# ---------- deploy ----------
+step "Deploying (first deploy: ~6 min for the stack, then the model loads)"
 cd "$ROOT/cdk"
 [ -d node_modules ] || npm ci --no-audit --no-fund
-if ! aws cloudformation describe-stacks --stack-name CDKToolkit >/dev/null 2>&1; then
-  npx cdk bootstrap "aws://$ACCOUNT/$REGION"
-fi
-PIN=()
-if [ -f "$ROOT/outputs.json" ]; then  # keep the running GPU host: reuse its AMI instead of the latest DLAMI
-  IID="$(python3 -c 'import json;print(next(iter(json.load(open("'"$ROOT"'/outputs.json")).values())).get("DeciderInstanceId",""))')"
+aws cloudformation describe-stacks --stack-name CDKToolkit >/dev/null 2>&1 || npx cdk bootstrap "aws://$ACCOUNT/$AWS_REGION"
+CTX=(-c instanceType="$IT" -c console="$CONSOLE")
+# Keep a running GPU host: reuse its AMI instead of the newest DLAMI, which would replace the instance.
+IID="$(out DeciderInstanceId)"
+if [ -n "$IID" ]; then
   AMI="$(aws ec2 describe-instances --instance-ids "$IID" --query 'Reservations[0].Instances[0].ImageId' --output text 2>/dev/null || true)"
-  [ -n "$AMI" ] && [ "$AMI" != None ] && PIN=(-c amiId="$AMI")
+  [ -n "$AMI" ] && [ "$AMI" != None ] && CTX+=(-c amiId="$AMI")
 fi
-npx cdk deploy --require-approval never --outputs-file "$ROOT/outputs.json" -c instanceType="$IT" "${PIN[@]}"
-FN="$(python3 -c 'import json;print(next(iter(json.load(open("'"$ROOT"'/outputs.json")).values()))["GuardFunctionName"])')"
+npx cdk deploy --require-approval never --outputs-file "$OUTPUTS" "${CTX[@]}"
+cd "$ROOT"
 
-invoke() {  # invoke the guard Lambda with a JSON payload, print the response
-  local out; out="$(mktemp)"
-  aws lambda invoke --function-name "$FN" --cli-binary-format raw-in-base64-out --payload "$1" "$out" >/dev/null
-  cat "$out"; rm -f "$out"
-}
+[ "$CONSOLE" = true ] && { step "Publishing the policy console"; publish_console; }
 
-echo
-echo "Waiting for strands-decider to come up (first boot installs packages and downloads the model: ~5-15 min)"
+step "Waiting for strands-decider (first boot installs packages and downloads the model: ~5-15 min)"
 for i in $(seq 1 60); do
-  H="$(invoke '{"health": true}' || true)"
+  H="$(invoke_guard '{"health": true}' || true)"
   if echo "$H" | grep -q '"ok": true'; then
-    echo "  ready: $(echo "$H" | python3 -c 'import json,sys; d=json.load(sys.stdin)["decider"]; print(d["model"], "on", d["device"])')"
+    ok "ready: $(echo "$H" | python3 -c 'import json,sys; d=json.load(sys.stdin)["decider"]; print(d["model"], "on", d["device"])')"
     break
   fi
-  [ "$i" = 60 ] && { echo "  not ready after 20 min; check ./ctl.sh logs" >&2; exit 1; }
+  [ "$i" = 60 ] && die "not ready after 20 min; see ./ctl.sh logs"
   printf '.'; sleep 20
 done
 
-echo
-echo "Smoke test"
-invoke '{"items":[{"source":"pii","text":"고객 김민수 010-2345-6789, 주민등록번호 900101-1234567"},{"source":"clean","text":"S3 버킷 정책 예시 보여줘"}]}' >/dev/null
-for t in "주민등록번호 900101-1234567 고객 조회" "홍길동 환자는 우울증 치료 중이라 야간 연락 금지" "S3 버킷 정책 예시 보여줘"; do
-  D="$(invoke "$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$t")" | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["decision"], r["results"][0]["latency_ms"], "ms")')"
+step "Smoke test"
+invoke_guard '{"text": "warm up"}' >/dev/null
+for t in "Customer John Smith, SSN 123-45-6789, lives at 42 Elm St" "주민등록번호 900101-1234567 고객 조회" \
+         "Patient Maria Garcia was diagnosed with HIV in 2021" "Show me an S3 bucket policy for cross-account access"; do
+  D="$(invoke_guard "$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$t")" | python3 -c 'import json,sys; r=json.load(sys.stdin); print(f"{r[\"decision\"]:5} {r[\"results\"][0][\"latency_ms\"]:7.1f} ms")')"
   echo "  $D  <- $t"
 done
 
-out() { python3 -c 'import json,sys;print(next(iter(json.load(open("'"$ROOT"'/outputs.json")).values()))[sys.argv[1]])' "$1"; }
-if [ -n "$ADMIN_EMAIL" ]; then "$ROOT/ctl.sh" add-admin "$ADMIN_EMAIL"; fi
-echo
-echo "Policy console: $(out AdminUrl)"
-[ -z "$ADMIN_EMAIL" ] && echo "  create a login with: ./ctl.sh add-admin you@example.com"
+if [ "$CONSOLE" = true ]; then
+  step "Policy console"
+  [ -n "$ADMIN_EMAIL" ] && "$ROOT/ctl.sh" add-admin "$ADMIN_EMAIL"
+  echo "  $(out AdminUrl)"
+  [ -z "$ADMIN_EMAIL" ] && echo "  create a login: ./ctl.sh add-admin you@example.com"
+fi
 
-echo
+step "Next"
 if [ -n "$INSTALL" ]; then
   P=(); [ -n "$PROFILE" ] && P=(--profile "$PROFILE")
-  "$ROOT/client/install.sh" --outputs "$ROOT/outputs.json" "${P[@]}" "${CLIENT_ARGS[@]}"
+  "$ROOT/client/install.sh" --outputs "$OUTPUTS" "${P[@]}" "${CLIENT_ARGS[@]}"
 else
-  echo "Install the hooks on each developer machine (needs lambda:InvokeFunction; attach the InvokePolicyArn output):"
-  echo "  client/install.sh --outputs outputs.json${PROFILE:+ --profile $PROFILE}"
+  echo "  Install the hooks on each developer machine (their IAM identity needs the InvokePolicyArn output policy):"
+  echo "    client/install.sh --outputs outputs.json${PROFILE:+ --profile $PROFILE}"
 fi

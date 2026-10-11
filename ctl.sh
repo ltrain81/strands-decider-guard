@@ -1,33 +1,53 @@
 #!/usr/bin/env bash
-# Operate the deployment:  ./ctl.sh start|stop|status|health|logs|add-admin EMAIL|console   (reads outputs.json)
+# Operate a deployment (reads outputs.json written by ./deploy.sh).
+#
+#   ./ctl.sh status              instance state and guard health
+#   ./ctl.sh health              guard Lambda -> decider health (model, device)
+#   ./ctl.sh stop | start        pause / resume the GPU host (the main cost)
+#   ./ctl.sh logs                setup + service logs from the host (via SSM)
+#   ./ctl.sh console             print the policy console URL
+#   ./ctl.sh add-admin EMAIL     create a console login (Cognito emails a temporary password)
+#   ./ctl.sh publish-console     re-upload the console files (after editing admin/web)
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-[ -f "$ROOT/outputs.json" ] || { echo "outputs.json not found; run ./deploy.sh first" >&2; exit 1; }
-read -r ID FN REGION < <(python3 -c 'import json; o=next(iter(json.load(open("'"$ROOT"'/outputs.json")).values())); print(o["DeciderInstanceId"], o["GuardFunctionName"], o["Region"])')
-export AWS_REGION="$REGION" AWS_DEFAULT_REGION="$REGION"
+source "$(dirname "$0")/scripts/lib.sh"
+require_outputs
+use_region
 
+ID="$(out DeciderInstanceId)"
 case "${1:-status}" in
-  start) aws ec2 start-instances --instance-ids "$ID" --query 'StartingInstances[0].CurrentState.Name' --output text
-         echo "model reload takes ~1-2 min; check ./ctl.sh health" ;;
-  stop)  aws ec2 stop-instances --instance-ids "$ID" --query 'StoppingInstances[0].CurrentState.Name' --output text
-         echo "stopped: hooks will fail (fail_mode=closed blocks prompts) until ./ctl.sh start" ;;
-  status) aws ec2 describe-instances --instance-ids "$ID" --query 'Reservations[0].Instances[0].[InstanceId,InstanceType,State.Name]' --output text ;;
-  health) out="$(mktemp)"; aws lambda invoke --function-name "$FN" --cli-binary-format raw-in-base64-out --payload '{"health": true}' "$out" >/dev/null
-          python3 -m json.tool "$out"; rm -f "$out" ;;
-  logs)  CID="$(aws ssm send-command --instance-ids "$ID" --document-name AWS-RunShellScript \
-           --parameters 'commands=["tail -n 30 /var/log/decider-setup.log","journalctl -u strands-decider -n 40 --no-pager"]' \
-           --query Command.CommandId --output text)"
-         sleep 4; aws ssm get-command-invocation --command-id "$CID" --instance-id "$ID" --query StandardOutputContent --output text ;;
+  status)
+    aws ec2 describe-instances --instance-ids "$ID" --query 'Reservations[0].Instances[0].[InstanceId,InstanceType,State.Name]' --output text
+    invoke_guard '{"health": true}' | python3 -c 'import json,sys; d=json.load(sys.stdin); print("guard:", "ok -", d["decider"]["model"], "on", d["decider"]["device"]) if d.get("ok") else print("guard: not ready -", d.get("error"))' ;;
+  health)
+    invoke_guard '{"health": true}' | python3 -m json.tool ;;
+  start)
+    aws ec2 start-instances --instance-ids "$ID" --query 'StartingInstances[0].CurrentState.Name' --output text
+    echo "the model reloads in ~1-2 min; check with: ./ctl.sh health" ;;
+  stop)
+    aws ec2 stop-instances --instance-ids "$ID" --query 'StoppingInstances[0].CurrentState.Name' --output text
+    echo "stopped. Until ./ctl.sh start, hooks with fail_mode=closed block prompts (set fail_mode=open in ~/.decider-guard/config.json to allow)." ;;
+  logs)
+    CID="$(aws ssm send-command --instance-ids "$ID" --document-name AWS-RunShellScript \
+      --parameters 'commands=["tail -n 30 /var/log/decider-setup.log","journalctl -u strands-decider -n 40 --no-pager"]' \
+      --query Command.CommandId --output text)"
+    sleep 4
+    aws ssm get-command-invocation --command-id "$CID" --instance-id "$ID" --query StandardOutputContent --output text ;;
+  console)
+    url="$(out AdminUrl)"; [ -n "$url" ] && echo "$url" || echo "policy console not deployed (deployed with -c console=false)" ;;
   add-admin)
-         [ -n "${2:-}" ] || { echo "usage: $0 add-admin EMAIL" >&2; exit 2; }
-         POOL="$(python3 -c 'import json; print(next(iter(json.load(open("'"$ROOT"'/outputs.json")).values()))["AdminUserPoolId"])')"
-         if aws cognito-idp admin-get-user --user-pool-id "$POOL" --username "$2" >/dev/null 2>&1; then
-           echo "admin $2 already exists"
-         else
-           aws cognito-idp admin-create-user --user-pool-id "$POOL" --username "$2" --desired-delivery-mediums EMAIL \
-             --user-attributes Name=email,Value="$2" Name=email_verified,Value=true >/dev/null
-           echo "admin $2 created; a temporary password was emailed (check spam)"
-         fi ;;
-  console) python3 -c 'import json; print(next(iter(json.load(open("'"$ROOT"'/outputs.json")).values()))["AdminUrl"])' ;;
-  *) echo "usage: $0 start|stop|status|health|logs|add-admin EMAIL|console" >&2; exit 2 ;;
+    [ -n "${2:-}" ] || die "usage: ./ctl.sh add-admin EMAIL"
+    POOL="$(out AdminUserPoolId)"; [ -n "$POOL" ] || die "policy console not deployed"
+    if aws cognito-idp admin-get-user --user-pool-id "$POOL" --username "$2" >/dev/null 2>&1; then
+      echo "admin $2 already exists"
+    else
+      aws cognito-idp admin-create-user --user-pool-id "$POOL" --username "$2" --desired-delivery-mediums EMAIL \
+        --user-attributes Name=email,Value="$2" Name=email_verified,Value=true >/dev/null
+      echo "admin $2 created. A temporary password was emailed (check spam); sign in at $(out AdminUrl)"
+    fi ;;
+  publish-console)
+    publish_console ;;
+  -h|--help|help)
+    sed -n '2,12p' "$0" ;;
+  *)
+    sed -n '2,12p' "$0" >&2; exit 2 ;;
 esac

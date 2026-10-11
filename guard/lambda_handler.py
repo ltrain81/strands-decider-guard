@@ -1,6 +1,6 @@
 """Lambda entry point.
 
-  {"items": [{"source", "text"}], "client": "claude"}   -> verdict under the saved policy
+  {"items": [{"source", "text"}], "client": "claude", "lang": "en"}   -> verdict under the saved policy
   {"items": [...], "policy": {...}, "dry_run": true}    -> verdict under a draft policy (admin console test; not logged)
   {"health": true}                                      -> decider status
 
@@ -57,10 +57,11 @@ def handler(event, context):
         except Exception as e:
             return {"ok": False, "error": str(e)}
     dry_run = bool(event.get("dry_run"))
-    policy = guard_core.normalize_policy(event["policy"]) if dry_run and "policy" in event else current_policy()
+    lang = guard_core.lang_of(event.get("lang"))
+    policy = guard_core.normalize_policy(event["policy"], lang) if dry_run and "policy" in event else current_policy()
     items = event.get("items") or [{"source": event.get("source", ""), "text": event.get("text", "")}]
     t0 = time.time()
-    out = guard_core.check_many(items, policy=policy)
+    out = guard_core.check_many(items, policy=policy, lang=lang)
     out["policy_updated_at"] = policy.get("updated_at")
     if not dry_run:
         log.info(json.dumps({

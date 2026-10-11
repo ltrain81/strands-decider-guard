@@ -4,14 +4,18 @@
 #   client/install.sh --outputs outputs.json                  # after ./deploy.sh (AWS backend)
 #   client/install.sh --function-name NAME --region REGION [--profile P]
 #   client/install.sh --local [--decider-url http://127.0.0.1:8000]   # no AWS: local strands-decider server
-#   options: --agents claude,kiro,codex  --fail-open  --claude-bedrock [--bedrock-region R]  --uninstall
+#   options: --agents claude,kiro,codex   only these agents (default: all three; 'none' = just ~/.decider-guard)
+#            --language en|ko             block-message language (default: from LANG)
+#            --fail-open                  allow (instead of block) when the guard is unreachable
+#            --claude-bedrock [--bedrock-region R]   also point Claude Code at Amazon Bedrock
+#            --uninstall                  remove the hooks again
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 DEST="${DECIDER_GUARD_HOME:-$HOME/.decider-guard}"
 BACKEND=lambda FN="" REGION="" PROFILE="" URL="http://127.0.0.1:8000" AGENTS="claude,kiro,codex"
-FAIL=closed BEDROCK="" BEDROCK_REGION="" UNINSTALL="" OUTPUTS=""
+FAIL=closed BEDROCK="" BEDROCK_REGION="" UNINSTALL="" OUTPUTS="" LANGUAGE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -23,10 +27,11 @@ while [ $# -gt 0 ]; do
     --decider-url) URL="$2"; shift ;;
     --agents) AGENTS="$2"; shift ;;
     --fail-open) FAIL=open ;;
+    --language) LANGUAGE="$2"; shift ;;
     --claude-bedrock) BEDROCK=1 ;;
     --bedrock-region) BEDROCK_REGION="$2"; shift ;;
     --uninstall) UNINSTALL=1 ;;
-    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -41,7 +46,10 @@ fi
 if [ -n "$OUTPUTS" ]; then
   read -r FN REGION < <(python3 -c 'import json,sys; o=next(iter(json.load(open(sys.argv[1])).values())); print(o["GuardFunctionName"], o["Region"])' "$OUTPUTS")
 fi
-if [ "$BACKEND" = lambda ] && [ -z "$FN" ]; then echo "need --outputs, --function-name or --local" >&2; exit 2; fi
+if [ "$BACKEND" = lambda ] && [ -z "$FN" ]; then echo "need --outputs outputs.json, --function-name NAME or --local (see --help)" >&2; exit 2; fi
+if [ "$BACKEND" = local ] && ! curl -sf -m 3 "$URL/health" >/dev/null; then
+  echo "no strands-decider at $URL. Start one first:  scripts/local-decider.sh start" >&2; exit 1
+fi
 
 mkdir -p "$DEST"
 cp "$HERE/decider_guard.py" "$ROOT/guard/guard_core.py" "$DEST/"
@@ -60,7 +68,7 @@ fi
 python3 - "$DEST/config.json" <<EOF
 import json, sys
 json.dump({"backend": "$BACKEND", "function_name": "$FN", "region": "$REGION" or None, "profile": "$PROFILE" or None,
-           "decider_url": "$URL", "fail_mode": "$FAIL"}, open(sys.argv[1], "w"), indent=2)
+           "decider_url": "$URL", "fail_mode": "$FAIL", "language": "$LANGUAGE" or None}, open(sys.argv[1], "w"), indent=2)
 EOF
 chmod 600 "$DEST/config.json"
 
@@ -72,12 +80,12 @@ python3 "$HERE/configure_agents.py" "${ARGS[@]}"
 
 echo
 echo "smoke test:"
-if echo '{"hook_event_name":"UserPromptSubmit","prompt":"주민등록번호 900101-1234567 로 조회해줘"}' | "$PY" "$DEST/decider_guard.py" claude | grep -q '"block"'; then
+if echo '{"hook_event_name":"UserPromptSubmit","prompt":"Look up the customer with resident number 900101-1234567"}' | "$PY" "$DEST/decider_guard.py" claude | grep -q '"block"'; then
   echo "  PII prompt -> blocked (ok)"
 else
   echo "  PII prompt was NOT blocked; check: $PY $DEST/decider_guard.py status" >&2; exit 1
 fi
-OUT=$(echo '{"hook_event_name":"UserPromptSubmit","prompt":"S3 버킷 정책 예시 보여줘"}' | "$PY" "$DEST/decider_guard.py" claude)
+OUT=$(echo '{"hook_event_name":"UserPromptSubmit","prompt":"Show me an S3 bucket policy example"}' | "$PY" "$DEST/decider_guard.py" claude)
 [ -z "$OUT" ] && echo "  clean prompt -> allowed (ok)" || { echo "  clean prompt was blocked: $OUT" >&2; exit 1; }
 echo
 echo "done. backend=$BACKEND fail_mode=$FAIL. audit log: $DEST/audit.log"

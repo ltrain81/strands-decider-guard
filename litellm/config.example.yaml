@@ -32,6 +32,7 @@ guardrails:
       # decider_url: http://<decider private IP>:8000   # when LiteLLM runs inside the guard VPC
       block_on_ask: true
       fail_mode: closed
+      language: en                                      # en | ko
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

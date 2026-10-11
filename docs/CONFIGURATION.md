@@ -1,0 +1,194 @@
+# Configuration reference
+
+Most people never need this page: `make local` or `make deploy` + `make install` pick sensible defaults, and
+the detection policy is edited in the [policy console](ADMIN.md). This page lists every knob.
+
+- [Hook (each developer machine)](#hook-each-developer-machine)
+- [Policy](#policy)
+- [AWS deployment](#aws-deployment)
+- [Local decider](#local-decider)
+- [LiteLLM guardrail](#litellm-guardrail)
+- [Enforcing the hooks org-wide](#enforcing-the-hooks-org-wide)
+- [IAM permissions](#iam-permissions)
+- [Files this project writes](#files-this-project-writes)
+
+## Hook (each developer machine)
+
+`client/install.sh` writes `~/.decider-guard/config.json`:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `backend` | `lambda` | `lambda`: call the deployed guard. `local`: run the engine in-process against a local decider |
+| `function_name`, `region`, `profile` | from `outputs.json` | Guard Lambda and the AWS profile used to call it (default credential chain if `profile` is empty) |
+| `decider_url` | `http://127.0.0.1:8000` | Local mode only |
+| `fail_mode` | `closed` | `closed`: block when the guard cannot be reached. `open`: allow, with a warning |
+| `language` | from `LANG` | `en` or `ko` for block messages and reasons |
+| `max_file_bytes` | `262144` | How much of a file is read for checking |
+| `override_token` | `#pii-ok` | A prompt starting with it passes an **ask** verdict (never a block) |
+
+`client/install.sh` flags:
+
+| Flag | Meaning |
+|---|---|
+| `--outputs outputs.json` | Read the guard name and region from a deployment |
+| `--function-name N --region R` | Same, by hand |
+| `--local [--decider-url URL]` | Local backend; needs a running decider (`scripts/local-decider.sh start`) |
+| `--agents claude,kiro,codex` | Which agents to configure (default: all three) |
+| `--profile P` | AWS profile for calling the guard |
+| `--language en\|ko` | Message language |
+| `--fail-open` | Set `fail_mode: open` |
+| `--claude-bedrock [--bedrock-region R]` | Also set `CLAUDE_CODE_USE_BEDROCK=1` / `AWS_REGION` in Claude Code's settings (existing values are kept) |
+| `--uninstall` | Remove the hooks (other hooks are untouched) |
+
+Local mode reads `~/.decider-guard/policy.json` if it exists. The local console (`make local-console`) writes it.
+
+## Policy
+
+Stored as JSON: in S3 for AWS deployments (versioned; the console writes it), in `~/.decider-guard/policy.json`
+locally. All keys are optional; missing keys take the defaults shown.
+
+```json
+{
+  "sensitivity": "balanced",
+  "categories": {
+    "resident_id": "block", "gov_id": "block", "financial": "block",
+    "contact": "block", "health": "block", "credential": "block"
+  },
+  "custom_rules": [
+    {"id": "phx", "name": "Project Phoenix", "action": "block", "sensitivity": "balanced", "enabled": true,
+     "question": "Does the text include unreleased schedules, revenue or launch plans for project 'Phoenix' (PHX)?"}
+  ],
+  "allow": {"email_domains": ["example.com"], "terms": ["Jane Doe"]},
+  "message": "Mask customer data before use. Questions: #privacy-help"
+}
+```
+
+- Actions are `block`, `ask` and `allow`. `allow` means the type is not checked at all.
+- Limits: 20 rules, 300-character questions, 100 allowlist entries of up to 100 characters each.
+
+Each category combines regex patterns and a model category:
+
+| Category | Regex patterns | Model category |
+|---|---|---|
+| `resident_id` | `kr_resident_id` (strong) | — |
+| `gov_id` | `kr_passport`, `us_ssn` | `government_id` |
+| `financial` | `card_number` (strong, Luhn-checked), `bank_account` | `financial` |
+| `contact` | `email`, `kr_mobile`, `phone_intl` | `contact` |
+| `health` | — | `health` |
+| `credential` | `aws_access_key_id`, `aws_secret_key`, `private_key` (all strong) | `credential` |
+
+- **Strong** patterns decide on their own, up to the category's action.
+- Other patterns only count when the model agrees.
+
+Sensitivity presets (from `PRESETS` in `guard/guard_core.py`):
+
+| | lenient | balanced | strict | Used as |
+|---|---|---|---|---|
+| `cat` | 0.85 | 0.80 | 0.70 | probability mass on enabled sensitive categories needed to count as sensitive |
+| `named` | 0.65 | 0.50 | 0.35 | sensitive + "names a specific person" ≥ this → block |
+| `pattern` | 0.45 | 0.30 | 0.20 | sensitive + a weak regex hit + real-PII ≥ this → block |
+| `block` | 0.85 | 0.75 | 0.60 | sensitive + real-PII ≥ this → block |
+| `ask` | 0.70 | 0.50 | 0.35 | sensitive + real-PII ≥ this → ask |
+| `rule` | 0.70 | 0.50 | 0.35 | custom rule answer ≥ this → the rule's action (per-rule sensitivity) |
+
+## AWS deployment
+
+`./deploy.sh` flags: `--region`, `--profile`, `--instance-type`, `--admin-email`, `--no-console`, `--preflight-only`,
+`-y`, and `--install-client`. `--install-client` passes `--agents`, `--claude-bedrock`, `--bedrock-region`,
+`--fail-open` and `--language` through to `install.sh`.
+
+The CDK context lives in `cdk/cdk.json`. Override a value with `-c key=value` in `DEPLOY_ARGS`, or edit the file.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `instanceType` | `g6.xlarge` | GPU host. Alternatives: `g5.xlarge`, `g4dn.xlarge`. CPU types also work but are much slower |
+| `modelId` | `StrandsAgents/strands-decider-2B-qwen3.5-v1-2610` | Hugging Face model served by the host |
+| `deciderRef` | a pinned commit | strands-decider version (also used by `make local`) |
+| `stackName` | `DeciderGuard` | CloudFormation stack name |
+| `console` | `true` | `false` skips the policy console (one fewer IAM role, no CloudFront/Cognito/API) |
+| `amiId` | — | Set automatically on redeploys so a newer GPU AMI does not replace the running host |
+
+Guard Lambda environment:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DECIDER_URL` | the host's private IP | strands-decider endpoint |
+| `POLICY_BUCKET`, `POLICY_KEY` | the stack's bucket, `policy.json` | where the console saves the policy |
+| `GUARD_CHUNK_CHARS` | `1500` | characters per model call for long inputs |
+| `GUARD_MAX_CHUNKS` | `16` | chunks per input. Longer inputs are sampled evenly, first and last chunk included |
+
+Outputs in `outputs.json`:
+- `GuardFunctionName`, `GuardFunctionArn`, `InvokePolicyArn`, `Region`
+- `DeciderInstanceId`
+- `AdminUrl`, `AdminUserPoolId`, `PolicyBucketName`
+- `Console*` (used by `ctl.sh publish-console`)
+
+## Local decider
+
+`scripts/local-decider.sh start|stop|status|logs`, configured by environment variables:
+
+| Variable | Default |
+|---|---|
+| `DECIDER_HOME` | `~/.strands-decider` (venv, model cache, logs) |
+| `DECIDER_PORT` | `8000` |
+| `DECIDER_DEVICE` | auto: `mps` on Apple silicon, `cuda` with `nvidia-smi`, else `cpu` |
+| `DECIDER_MODEL` | `modelId` from `cdk/cdk.json` |
+
+The local console is `python3 admin/dev_server.py [--port 8770] [--decider-url URL] [--home ~/.decider-guard]`.
+It binds to 127.0.0.1 only and has no login.
+
+## LiteLLM guardrail
+
+`litellm/config.example.yaml` → `guardrails[].litellm_params`:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `backend` | `lambda` | `lambda` (invoke the guard) or `http` (call strands-decider directly; needs `guard_core.py` next to the guardrail) |
+| `function_name`, `region` | — | guard Lambda (backend `lambda`) |
+| `decider_url` | — | backend `http` |
+| `block_on_ask` | `true` | treat **ask** as block (a proxy cannot ask the user) |
+| `fail_mode` | `closed` | `closed` returns 503 when the guard is unreachable |
+| `language` | `en` | `en` or `ko` |
+
+## Enforcing the hooks org-wide
+
+Users can edit their own settings. To make the Claude Code hooks mandatory, deploy them as **managed settings**
+with your device-management tool:
+- macOS: `/Library/Application Support/ClaudeCode/managed-settings.json`
+- Linux: `/etc/claude-code/managed-settings.json`
+
+```json
+{
+  "allowManagedHooksOnly": true,
+  "hooks": {
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "DECIDER_GUARD_HOME=/opt/decider-guard /opt/decider-guard/venv/bin/python /opt/decider-guard/decider_guard.py claude", "timeout": 30, "onFailure": "block"}]}],
+    "PreToolUse": [{"matcher": "^(Read|Write|Edit|MultiEdit|NotebookEdit|Bash|WebFetch|WebSearch|Task|Agent)$|^mcp__", "hooks": [{"type": "command", "command": "DECIDER_GUARD_HOME=/opt/decider-guard /opt/decider-guard/venv/bin/python /opt/decider-guard/decider_guard.py claude", "timeout": 30, "onFailure": "block"}]}],
+    "PostToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "DECIDER_GUARD_HOME=/opt/decider-guard /opt/decider-guard/venv/bin/python /opt/decider-guard/decider_guard.py claude", "timeout": 30, "onFailure": "block"}]}]
+  }
+}
+```
+
+- Install `decider_guard.py`, `guard_core.py`, a venv with boto3 and a `config.json` under `/opt/decider-guard`.
+  `sudo DECIDER_GUARD_HOME=/opt/decider-guard client/install.sh --outputs outputs.json --agents none` does that
+  without touching any user's agent config.
+- For model traffic users cannot route around, use the [LiteLLM guardrail](LITELLM.md) or Bedrock Guardrails.
+
+## IAM permissions
+
+| Who | Needs |
+|---|---|
+| Whoever runs `deploy.sh` | CloudFormation, plus permission to create the stack's resources (EC2, VPC, Lambda, IAM roles, S3, CloudFront, Cognito, API Gateway, Logs). The usual CDK bootstrap roles cover this |
+| Each developer (hook, `backend: lambda`) | the `InvokePolicyArn` managed policy only: `lambda:InvokeFunction` on the guard |
+| LiteLLM host (`backend: lambda`) | the same `InvokePolicyArn` policy |
+| Console admins | a Cognito user (`make add-admin`); no AWS access needed |
+
+## Files this project writes
+
+| Path | What |
+|---|---|
+| `~/.decider-guard/` | hook script, engine copy, `config.json`, local `policy.json`, `audit.log` (decisions only, no text) |
+| `~/.claude/settings.json` | three hook entries (backed up to `settings.json.bak-decider-guard`) |
+| `~/.kiro/hooks/decider-guard.json` | global Kiro hooks |
+| `~/.codex/hooks.json` | two hook entries (backed up) |
+| `~/.strands-decider/` | local decider venv, model cache, server log (`make local`) |
+| `outputs.json` | deployment outputs (names and ARNs, no secrets) |

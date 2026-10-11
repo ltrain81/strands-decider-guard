@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the guard policy on the synthetic samples. Usage: test_policy.py [--holdout] [--sensitivity=strict] [decider_url]"""
+"""Run the guard policy on the synthetic samples. Usage: eval_accuracy.py [--holdout] [--sensitivity=strict] [decider_url]"""
 import os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, "..", "guard")]

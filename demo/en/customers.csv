@@ -1,0 +1,4 @@
+customer_id,name,phone,email,ssn,address
+C-1001,Jane Doe,+1-415-555-0199,jane.doe@example.com,123-45-6789,42 Elm St Springfield
+C-1002,Mark Chen,+1-650-555-0101,mark.chen@example.com,234-56-7890,9 Oak Ave Palo Alto
+C-1003,Priya Patel,+1-212-555-0142,priya.p@example.com,345-67-8901,77 Pine Rd New York

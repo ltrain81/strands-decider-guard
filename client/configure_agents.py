@@ -120,8 +120,9 @@ def main():
     a = p.parse_args()
     if a.action == "install" and not a.command:
         p.error("--command is required for install")
-    for agent in a.agents.split(","):
-        {"claude": claude, "kiro": kiro, "codex": codex}[agent.strip()](a.action == "install", a)
+    for agent in (x.strip() for x in a.agents.split(",")):
+        if agent and agent != "none":  # "none": only set up ~/.decider-guard (e.g. for managed settings)
+            {"claude": claude, "kiro": kiro, "codex": codex}[agent](a.action == "install", a)
 
 
 if __name__ == "__main__":

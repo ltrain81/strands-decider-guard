@@ -23,13 +23,28 @@ SEVERITY = {"allow": 0, "ask": 1, "block": 2}
 ACTIONS = tuple(SEVERITY)
 
 # Information types admins can control. "kinds" are the decider's categories, "patterns" the regex types.
+LANGS = ("en", "ko")
 CATEGORIES = [
-    {"id": "resident_id", "label": "주민·외국인등록번호", "desc": "주민등록번호, 외국인등록번호 형식 (예: 900101-1******). 모델 판단은 '신분증 번호' 설정을 따릅니다", "kinds": [], "patterns": ["kr_resident_id"]},
-    {"id": "gov_id", "label": "신분증 번호", "desc": "여권, 운전면허, 미국 SSN 등", "kinds": ["government_id"], "patterns": ["kr_passport", "us_ssn"]},
-    {"id": "financial", "label": "카드·계좌번호", "desc": "신용/체크카드 번호, 은행 계좌번호", "kinds": ["financial"], "patterns": ["card_number", "bank_account"]},
-    {"id": "contact", "label": "개인 연락처·신원", "desc": "특정인의 이름과 전화번호, 이메일, 주소 등", "kinds": ["contact"], "patterns": ["email", "kr_mobile", "phone_intl"]},
-    {"id": "health", "label": "건강·의료 정보", "desc": "특정인의 진단, 치료, 처방, 병력 (정규식으로는 못 잡는 문맥 판단)", "kinds": ["health"], "patterns": []},
-    {"id": "credential", "label": "비밀번호·API 키", "desc": "비밀번호, 액세스 키, 토큰, 개인 키", "kinds": ["credential"], "patterns": ["aws_access_key_id", "aws_secret_key", "private_key"]},
+    {"id": "resident_id", "kinds": [], "patterns": ["kr_resident_id"],
+     "label": {"en": "Resident registration number", "ko": "주민·외국인등록번호"},
+     "desc": {"en": "Korean resident / alien registration number format (e.g. 900101-1******). The model's ID judgement follows 'Government ID'.",
+              "ko": "주민등록번호, 외국인등록번호 형식 (예: 900101-1******). 모델 판단은 '신분증 번호' 설정을 따릅니다"}},
+    {"id": "gov_id", "kinds": ["government_id"], "patterns": ["kr_passport", "us_ssn"],
+     "label": {"en": "Government ID", "ko": "신분증 번호"},
+     "desc": {"en": "Passport, driver's license, US SSN and similar", "ko": "여권, 운전면허, 미국 SSN 등"}},
+    {"id": "financial", "kinds": ["financial"], "patterns": ["card_number", "bank_account"],
+     "label": {"en": "Card / bank account", "ko": "카드·계좌번호"},
+     "desc": {"en": "Credit/debit card numbers, bank account numbers", "ko": "신용/체크카드 번호, 은행 계좌번호"}},
+    {"id": "contact", "kinds": ["contact"], "patterns": ["email", "kr_mobile", "phone_intl"],
+     "label": {"en": "Personal contact / identity", "ko": "개인 연락처·신원"},
+     "desc": {"en": "A specific person's name with phone, email or address", "ko": "특정인의 이름과 전화번호, 이메일, 주소 등"}},
+    {"id": "health", "kinds": ["health"], "patterns": [],
+     "label": {"en": "Health / medical", "ko": "건강·의료 정보"},
+     "desc": {"en": "A specific person's diagnosis, treatment, prescriptions or history (context judgement regex cannot do)",
+              "ko": "특정인의 진단, 치료, 처방, 병력 (정규식으로는 못 잡는 문맥 판단)"}},
+    {"id": "credential", "kinds": ["credential"], "patterns": ["aws_access_key_id", "aws_secret_key", "private_key"],
+     "label": {"en": "Passwords / API keys", "ko": "비밀번호·API 키"},
+     "desc": {"en": "Passwords, access keys, tokens, private keys", "ko": "비밀번호, 액세스 키, 토큰, 개인 키"}},
 ]
 CATEGORY_OF_KIND = {k: c["id"] for c in CATEGORIES for k in c["kinds"]}
 CATEGORY_OF_PATTERN = {p: c["id"] for c in CATEGORIES for p in c["patterns"]}
@@ -40,7 +55,36 @@ PRESETS = {
     "balanced": {"cat": 0.80, "named": 0.50, "block": 0.75, "ask": 0.50, "pattern": 0.30, "rule": 0.50},
     "strict":   {"cat": 0.70, "named": 0.35, "block": 0.60, "ask": 0.35, "pattern": 0.20, "rule": 0.35},
 }
-SENSITIVITY_LABELS = {"lenient": "관대", "balanced": "보통", "strict": "엄격"}
+SENSITIVITY_LABELS = {"en": {"lenient": "Lenient", "balanced": "Balanced", "strict": "Strict"},
+                      "ko": {"lenient": "관대", "balanced": "보통", "strict": "엄격"}}
+
+# User-facing strings: admin validation errors and verdict reasons. Findings themselves stay structured.
+TEXT = {
+    "en": {
+        "bad_sensitivity": "Unknown sensitivity: {v}", "bad_category": "Unknown information type: {v}",
+        "bad_action": "{v}: action must be block, ask or allow", "too_many_rules": "At most {n} custom rules",
+        "empty_question": "Rule {i}: the question is empty", "long_question": "Rule {i}: keep the question under {n} characters",
+        "bad_rule": "Rule {i}: invalid action or sensitivity", "bad_allow": "Too many or too long allowlist entries",
+        "rule_hit": "custom rule '{name}' matched (p={p})", "pattern": "{label} pattern found ({sample})",
+        "model": "{label} (decider: sensitive {s}, specific person {n}, real PII {r})",
+    },
+    "ko": {
+        "bad_sensitivity": "알 수 없는 민감도: {v}", "bad_category": "알 수 없는 정보 유형: {v}",
+        "bad_action": "{v}: 동작은 block/ask/allow 중 하나여야 합니다", "too_many_rules": "사용자 규칙은 최대 {n}개입니다",
+        "empty_question": "규칙 {i}: 질문이 비어 있습니다", "long_question": "규칙 {i}: 질문은 {n}자 이내로 써 주세요",
+        "bad_rule": "규칙 {i}: 동작 또는 민감도 값이 잘못되었습니다", "bad_allow": "허용 목록 항목이 너무 많거나 깁니다",
+        "rule_hit": "사용자 규칙 '{name}' 에 해당 (확률 {p})", "pattern": "{label} 패턴 감지 ({sample})",
+        "model": "{label} 판단 (decider: 민감 유형 확률 {s}, 특정인 확률 {n}, 실제 PII 확률 {r})",
+    },
+}
+
+
+def lang_of(lang):
+    return lang if lang in LANGS else "en"
+
+
+def t(lang, key, **kw):
+    return TEXT[lang_of(lang)][key].format(**kw)
 
 DEFAULT_POLICY = {
     "schema": 1,
@@ -53,30 +97,30 @@ DEFAULT_POLICY = {
 LIMITS = {"rules": 20, "question": 300, "name": 60, "allow_items": 100, "allow_item": 100, "message": 500}
 
 
-def normalize_policy(p):
-    """Validate a policy and fill in defaults. Raises ValueError with a readable message."""
+def normalize_policy(p, lang="en"):
+    """Validate a policy and fill in defaults. Raises ValueError with a readable (localized) message."""
     p = copy.deepcopy(p or {})
     out = copy.deepcopy(DEFAULT_POLICY)
     sens = p.get("sensitivity", out["sensitivity"])
     if sens not in PRESETS:
-        raise ValueError(f"알 수 없는 민감도: {sens}")
+        raise ValueError(t(lang, "bad_sensitivity", v=sens))
     out["sensitivity"] = sens
     for cid, action in (p.get("categories") or {}).items():
         if cid not in out["categories"]:
-            raise ValueError(f"알 수 없는 정보 유형: {cid}")
+            raise ValueError(t(lang, "bad_category", v=cid))
         if action not in ACTIONS:
-            raise ValueError(f"{cid}: 동작은 block/ask/allow 중 하나여야 합니다")
+            raise ValueError(t(lang, "bad_action", v=cid))
         out["categories"][cid] = action
     rules = p.get("custom_rules") or []
     if len(rules) > LIMITS["rules"]:
-        raise ValueError(f"사용자 규칙은 최대 {LIMITS['rules']}개입니다")
+        raise ValueError(t(lang, "too_many_rules", n=LIMITS["rules"]))
     seen = set()
     for i, r in enumerate(rules):
         q = str(r.get("question", "")).strip()
         if not q:
-            raise ValueError(f"규칙 {i + 1}: 질문이 비어 있습니다")
+            raise ValueError(t(lang, "empty_question", i=i + 1))
         if len(q) > LIMITS["question"]:
-            raise ValueError(f"규칙 {i + 1}: 질문은 {LIMITS['question']}자 이내로 써 주세요")
+            raise ValueError(t(lang, "long_question", i=i + 1, n=LIMITS["question"]))
         rid = re.sub(r"[^a-zA-Z0-9_-]", "", str(r.get("id") or f"r{i + 1}"))[:32] or f"r{i + 1}"
         while rid in seen:
             rid += "x"
@@ -84,14 +128,14 @@ def normalize_policy(p):
         action = r.get("action", "block")
         rs = r.get("sensitivity", "balanced")
         if action not in ACTIONS or rs not in PRESETS:
-            raise ValueError(f"규칙 {i + 1}: 동작 또는 민감도 값이 잘못되었습니다")
+            raise ValueError(t(lang, "bad_rule", i=i + 1))
         out["custom_rules"].append({"id": rid, "name": str(r.get("name") or q)[:LIMITS["name"]], "question": q,
                                     "action": action, "sensitivity": rs, "enabled": bool(r.get("enabled", True))})
     allow = p.get("allow") or {}
     for key in ("email_domains", "terms"):
         vals = [str(v).strip() for v in allow.get(key, []) if str(v).strip()]
         if len(vals) > LIMITS["allow_items"] or any(len(v) > LIMITS["allow_item"] for v in vals):
-            raise ValueError("허용 목록 항목이 너무 많거나 깁니다")
+            raise ValueError(t(lang, "bad_allow"))
         out["allow"][key] = [v.lstrip("@").lower() for v in vals] if key == "email_domains" else vals
     out["message"] = str(p.get("message") or "")[:LIMITS["message"]]
     for k in ("updated_at", "updated_by"):
@@ -154,12 +198,12 @@ def mask(value):
 def apply_allowlist(text, policy):
     """Blank out allowlisted terms and emails of allowed domains so neither regex nor the model sees them."""
     for term in policy["allow"]["terms"]:
-        text = re.sub(re.escape(term), "[허용됨]", text, flags=re.IGNORECASE)
+        text = re.sub(re.escape(term), "[allowed]", text, flags=re.IGNORECASE)
     domains = policy["allow"]["email_domains"]
     if domains:
         def repl(m):
             d = m.group(0).rsplit("@", 1)[1].lower()
-            return "[허용된 이메일]" if any(d == x or d.endswith("." + x) for x in domains) else m.group(0)
+            return "[allowed email]" if any(d == x or d.endswith("." + x) for x in domains) else m.group(0)
         text = EMAIL.sub(repl, text)
     return text
 
@@ -243,7 +287,7 @@ def _questions(policy, need_pii):
     return qs
 
 
-def check(text, decider_url=None, policy=None):
+def check(text, decider_url=None, policy=None, lang="en"):
     """Return {"decision": allow|ask|block, "reasons": [...], "findings": [...], ...} for one text."""
     t0 = time.time()
     policy = normalize_policy(policy)
@@ -281,34 +325,39 @@ def check(text, decider_url=None, policy=None):
                 break
     for f in result["findings"]:
         f.pop("pos", None)
-    result["reasons"] = [describe(f) for f in result["findings"]] if result["decision"] != "allow" else []
+    result["reasons"] = [describe(f, lang) for f in result["findings"]] if result["decision"] != "allow" else []
     result["latency_ms"] = round((time.time() - t0) * 1000, 1)
     return result
 
 
-LABELS = {
-    "kr_resident_id": "주민등록번호", "card_number": "카드번호", "aws_access_key_id": "AWS Access Key", "aws_secret_key": "AWS Secret Key",
-    "private_key": "개인 키", "email": "이메일", "kr_mobile": "휴대폰 번호", "phone_intl": "전화번호", "us_ssn": "SSN",
-    "kr_passport": "여권번호", "bank_account": "계좌번호", "contact": "개인 연락처/신원 정보", "government_id": "신분증 번호",
-    "financial": "금융 정보", "health": "건강/의료 정보", "credential": "비밀번호/인증 정보",
+PATTERN_LABELS = {
+    "en": {"kr_resident_id": "Resident registration number", "card_number": "Card number", "aws_access_key_id": "AWS access key",
+           "aws_secret_key": "AWS secret key", "private_key": "Private key", "email": "Email", "kr_mobile": "Mobile number",
+           "phone_intl": "Phone number", "us_ssn": "SSN", "kr_passport": "Passport number", "bank_account": "Bank account",
+           "contact": "Personal contact / identity", "government_id": "Government ID", "financial": "Financial data",
+           "health": "Health / medical data", "credential": "Password / credential"},
+    "ko": {"kr_resident_id": "주민등록번호", "card_number": "카드번호", "aws_access_key_id": "AWS Access Key", "aws_secret_key": "AWS Secret Key",
+           "private_key": "개인 키", "email": "이메일", "kr_mobile": "휴대폰 번호", "phone_intl": "전화번호", "us_ssn": "SSN",
+           "kr_passport": "여권번호", "bank_account": "계좌번호", "contact": "개인 연락처/신원 정보", "government_id": "신분증 번호",
+           "financial": "금융 정보", "health": "건강/의료 정보", "credential": "비밀번호/인증 정보"},
 }
 
 
-def describe(f):
+def describe(f, lang="en"):
     if f["source"] == "rule":
-        return f"사용자 규칙 '{f['name']}' 에 해당 (확률 {f['p']})"
-    label = LABELS.get(f["type"], f["type"])
+        return t(lang, "rule_hit", name=f["name"], p=f["p"])
+    label = PATTERN_LABELS[lang_of(lang)].get(f["type"], f["type"])
     if f["source"] == "regex":
-        return f"{label} 패턴 감지 ({f['sample']})"
-    return f"{label} 판단 (decider: 민감 유형 확률 {f['kind_confidence']}, 특정인 확률 {f['p_named']}, 실제 PII 확률 {f['p_pii']})"
+        return t(lang, "pattern", label=label, sample=f["sample"])
+    return t(lang, "model", label=label, s=f["kind_confidence"], n=f["p_named"], r=f["p_pii"])
 
 
-def check_many(items, decider_url=None, policy=None):
+def check_many(items, decider_url=None, policy=None, lang="en"):
     """items: [{"source": str, "text": str}] -> overall decision plus per-item results."""
     policy = normalize_policy(policy)
     results, overall = [], "allow"
     for it in items:
-        r = check(it.get("text", ""), decider_url, policy)
+        r = check(it.get("text", ""), decider_url, policy, lang)
         r["source"] = it.get("source", "")
         results.append(r)
         if SEVERITY[r["decision"]] > SEVERITY[overall]:

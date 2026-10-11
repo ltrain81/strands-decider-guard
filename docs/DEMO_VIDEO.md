@@ -1,90 +1,96 @@
-# 데모 영상 촬영 가이드
+# Recording a demo
 
-목표: **3분 안팎**의 화면 녹화 하나로 "코딩 에이전트에 고객 PII 가 들어가기 전에 막힌다"를 보여 줍니다.
-화면은 둘로 나눕니다. 왼쪽에서 에이전트가 일하고, 오른쪽에 판정 로그가 실시간으로 찍힙니다.
+[한국어](DEMO_VIDEO.ko.md)
 
-## 1. 사전 준비 (촬영 30분 전)
+Goal: a **~3 minute** screen recording that shows customer PII being stopped before it reaches a coding agent's model.
+Split the screen: the agent works on the left, and decisions appear live on the right.
+
+## 1. Prepare (30 minutes before)
 
 ```bash
-./ctl.sh start && ./ctl.sh health          # AWS 사용 시: 모델·디바이스 확인 (device: cuda)
-client/install.sh --outputs outputs.json   # 촬영할 PC 에 hook 설치 (이미 했다면 생략)
-AUTO=0 demo/run_demo.sh 1                  # 워밍업: Lambda·모델 cold start 를 미리 지나가게
+make health          # AWS: the model is up (device: cuda). Local: scripts/local-decider.sh status
+make install         # or make local, if the hooks are not installed yet
+demo/run_demo.sh 1   # warm-up: gets Lambda and model cold starts out of the way
 ```
 
-- **데이터 점검**: `demo/` 의 고객 데이터는 전부 가짜입니다. 실제 고객 데이터를 화면에 띄우지 마세요.
-- **화면에 나오면 안 되는 것**:
-  - AWS 계정 ID, ARN, 자격 증명 (`~/.aws`, `env` 출력)
-  - 사내 URL, Slack 알림
-  - 셸 프롬프트의 사용자명·호스트명. `PS1='$ '` 로 줄여 두세요.
-- **방해 금지 모드**를 켜고 메신저와 메일을 종료합니다.
-- **터미널**:
-  - 글꼴 18–20pt, 다크 테마, 창 크기 1920×1080 기준
-  - 줄 간격을 넉넉하게
-  - 커서 깜빡임은 꺼 둡니다
-- 화면 분할 (iTerm2 `⌘D`, 또는 tmux):
-  - 왼쪽 70%: `cd demo`
-  - 오른쪽 30%: `demo/watch_audit.sh`. 시각, 에이전트, 도구, 판정(BLOCK 빨강/ALLOW 초록), 지연시간, 감지 유형이 한 줄씩 나옵니다. 원문은 절대 나오지 않습니다.
+- **Data:** everything in `demo/en` and `demo/ko` is synthetic. Never show real customer data.
+- **Keep off screen:**
+  - AWS account IDs and ARNs, credentials (`~/.aws`, `env` output)
+  - internal URLs and chat notifications
+  - your user and host name: shorten the prompt with `PS1='$ '`
+- Turn on **Do Not Disturb** and quit chat and mail apps.
+- **Terminal:** 18–20 pt font, dark theme, 1920×1080 window, generous line spacing, cursor blink off.
+- Split the screen (iTerm2 `⌘D`, or tmux):
+  - Left, about 70%: the agent.
+  - Right, about 30%: `demo/watch_audit.sh`. One line per decision: time, agent, tool, BLOCK (red) or ALLOW (green),
+    latency and the detected types. It never prints text.
 
-## 2. 녹화 도구
+## 2. Tools
 
-| 방법 | 언제 | 방법 |
+| Tool | When | How |
 |---|---|---|
-| macOS 기본 (`⌘⇧5`) | 가장 간단 | "선택 부분 기록" 으로 터미널 영역만. 옵션에서 마이크 선택 |
-| QuickTime | 내레이션을 같이 녹음 | 파일 > 새로운 화면 기록 |
-| OBS Studio | 얼굴 캠 + 화면, 장면 전환 | 터미널 창 캡처 + 웹캠 소스 |
-| asciinema + agg | README 용 GIF, 가벼운 공유 | `asciinema rec demo.cast` → `agg demo.cast demo.gif` |
+| macOS (`⌘⇧5`) | simplest | "Record selected portion" around the terminal; pick a microphone under Options |
+| QuickTime | with voice-over | File → New Screen Recording |
+| OBS Studio | webcam + screen, scene changes | window capture + video capture device |
+| asciinema + agg | a GIF for a README | `asciinema rec demo.cast` → `agg demo.cast demo.gif` |
 
-내레이션은 녹화와 따로 하는 편이 깔끔합니다. 먼저 화면만 녹화하고 편집할 때 음성을 입히세요.
+Recording the voice-over separately, while editing, usually sounds better.
 
-## 3. 장면 구성 (스크립트 재생)
+## 3. Scenes (scripted)
 
-일정한 결과를 위해 `demo/run_demo.sh` 가 장면마다 프롬프트를 타이핑하듯 보여 주고 Claude Code 를 실행합니다.
-Enter 로 다음 장면으로 넘어가며, `AUTO=4` 를 주면 4초 뒤 자동으로 넘어갑니다.
+`demo/run_demo.sh` types each prompt out and runs Claude Code, so takes come out consistent.
+Press Enter to go to the next scene, or set `AUTO=4` to advance after 4 seconds.
 
 ```bash
-cd demo && ./run_demo.sh          # 전체
-./run_demo.sh 3 4                 # 특정 장면만 다시 찍기
-MODEL=sonnet ./run_demo.sh        # 기본은 haiku (응답이 빠름)
+demo/run_demo.sh               # all scenes (English; DEMO_LANG=ko for Korean)
+demo/run_demo.sh 3 4           # retake scenes 3 and 4
+MODEL=sonnet demo/run_demo.sh  # default is haiku, which answers fastest
 ```
 
-| # | 화면 | 기대 결과 | 내레이션 예시 |
+| # | Screen | Expected | Suggested narration |
 |---|---|---|---|
-| 0 | README 의 구조 그림 (10초) | — | "Claude Code 앞단에 2B 크기의 판단 모델 strands-decider 를 붙였습니다. 프롬프트와 도구 호출이 모델에 가기 전에 AWS 의 guard 를 거칩니다." |
-| 1 | `architecture.md` 요약 | 통과, 정상 요약 | "평소 작업은 그대로 됩니다. 문서에 '고객 연락처' 라는 말이 있어도 실제 값이 없으니 통과합니다." |
-| 2 | 주민번호가 든 프롬프트 | `UserPromptSubmit operation blocked by hook` + 마스킹된 근거 | "주민등록번호를 붙여 넣으면 모델 호출 자체가 일어나지 않습니다. 근거도 마스킹돼서 보입니다." |
-| 3 | `customers.csv` 읽기 | Read 거부: 주민번호·이메일·휴대폰 | "에이전트가 고객 명단 파일을 읽으려 하면, 읽기 전에 내용을 검사해서 막습니다." |
-| 4 | `support_ticket.txt` 읽기 | Read 거부: 건강/의료 정보 판단 | "**여기가 핵심입니다.** 이 파일에는 정규식에 걸릴 번호가 없습니다. 그래도 decider 가 '특정인의 우울증 치료 정보' 라고 판단해 막습니다. 판정은 수백 ms 안에 끝납니다." |
-| 5 | `cat customers.csv` 실행 요청 | Bash 거부 | "셸로 우회해도 명령이 읽는 파일을 검사합니다." |
-| 6 | 오른쪽 판정 로그 클로즈업 (10초) | BLOCK/ALLOW 기록 | "로그에는 판정과 유형, 지연시간만 남고 원문은 남지 않습니다." |
+| 0 | the diagram in the README (10 s) | — | "We put a 2B decision model, strands-decider, in front of Claude Code. Prompts and tool calls are checked by a guard on AWS before the model sees them." |
+| 1 | summarize `architecture.md` | allowed, normal summary | "Normal work just works. This document mentions customer contact fields, but holds no actual values." |
+| 2 | prompt with a resident number | `UserPromptSubmit operation blocked by hook` + masked reason | "Paste a national ID and the model is never called. The reason is shown masked." |
+| 3 | read `customers.csv` | Read denied: SSN, emails, phones | "When the agent tries to read the customer list, the file is checked first and the read is denied." |
+| 4 | read `support_ticket.txt` | Read denied: health / medical | "**This is the key part.** There is no number here for a regex to catch, but the model judges it to be a named person's health information and blocks it, in a few hundred milliseconds." |
+| 5 | ask it to run `cat customers.csv` | Bash denied | "Going through the shell doesn't help: the files a command reads are checked too." |
+| 6 | close-up of the decision log (10 s) | BLOCK / ALLOW lines | "The log keeps decisions, types and latency. Never the text." |
 
-장면 4 의 판정 확률값(예: `민감 유형 확률 0.974`)은 화면에서 잠깐 확대하면 좋습니다. 규칙 기반 DLP 와 다른 점이 여기서 드러납니다.
+In scene 4, zoom in on the probabilities (e.g. `sensitive 0.984, specific person 0.891`). That is what sets this
+apart from rule-based DLP.
 
-## 4. 선택 장면
+## 4. Optional scenes
 
-- **대화형 Claude Code**: `cd demo && claude` 로 직접 입력하면 더 자연스럽습니다. 스크립트와 같은 프롬프트를 쓰세요.
-  - Claude Code 에서 `ask` 판정(애매한 경우)은 사용자 확인창으로 뜹니다.
-  - 프롬프트 차단 후 `#pii-ok` 접두어로 통과하는 장면은 *애매한 경우에만* 동작합니다. 주민번호처럼 확실한 건 접두어가 있어도 막힙니다.
-- **Kiro CLI**: `cd demo && kiro-cli chat` → `customers.csv 읽어줘`. 도구가 차단되는 것을 보여 줍니다.
-  Kiro CLI 는 프롬프트 자체는 못 막는다는 점을 솔직하게 언급하세요. 대신 모델에 경고가 들어갑니다.
-- **Codex CLI**: `cd demo && codex` → `cat customers.csv 해줘`. 처음 실행 시 `/hooks` 에서 hook 을 Trust 하는 장면은 미리 끝내 두세요.
-- **LiteLLM (서버 측)**: [LITELLM.md](LITELLM.md) 설정 후 같은 요청을 curl 로 보내 HTTP 400 이 오는 것을 보여 줍니다. "사용자가 hook 을 꺼도 프록시에서 막힌다" 는 메시지에 좋습니다.
-- **운영 화면**:
-  - `./ctl.sh health` 로 GPU 위 모델 상태를 보여 줍니다.
-  - CloudWatch Logs 의 guard Lambda 로그는 판정, 유형, 글자 수만 있고 원문이 없다는 점을 보여 줍니다. 계정 ID 는 가리세요.
+- **Interactive Claude Code:** `cd demo/en && claude`, then type the same prompts. This looks more natural.
+  - An **ask** verdict shows a confirmation dialog.
+  - The `#pii-ok` prefix passes only *uncertain* prompts. A resident number is blocked even with it.
+- **Kiro CLI:** `cd demo/en && kiro-cli chat`, then "read customers.csv": the tool call is blocked.
+  Say plainly that Kiro CLI cannot block prompts; the model is warned instead.
+- **Codex CLI:** `cd demo/en && codex`, then "cat customers.csv". Approve the hooks with `/hooks` before you record.
+- **Policy console:**
+  - Add a rule on camera, e.g. from the "Unreleased project details" template.
+  - On the Test tab, check "Phoenix launches next March…": it is blocked. Save.
+  - Show that the next agent request is blocked by the new rule.
+- **LiteLLM (server-side):** after [LITELLM.md](LITELLM.md), send the same request with curl and show the HTTP 400.
+  This lands the point "even if a user removes the hook, the proxy blocks it".
+- **Operations:**
+  - `make health` shows the model on the GPU.
+  - In CloudWatch Logs, the guard Lambda's lines hold decisions, types and sizes but no text. Blur the account ID.
 
-## 5. 촬영 팁
+## 5. Tips
 
-- 첫 요청은 cold start 로 1–3초 더 걸릴 수 있습니다. 워밍업을 꼭 하세요.
-- 모델 응답 문장은 매번 조금씩 다릅니다. 마음에 드는 테이크가 나올 때까지 장면별로 다시 찍고 편집에서 이어 붙이세요.
-- 장면 사이에 `clear` 가 들어가므로 컷 편집 지점이 깔끔합니다.
-- 대기 구간은 편집에서 1.5–2배속으로 줄이고, 차단 메시지는 원속도로 보여 주세요.
-- 자막은 장면 제목(스크립트가 맨 위에 출력하는 `[n/5] ...`)을 그대로 쓰면 됩니다.
+- The first request can take 1–3 s longer (cold start). Always warm up.
+- Answers vary slightly between runs. Retake scenes and cut the best ones together.
+- Each scene starts with `clear`, which gives clean cut points.
+- Speed up the waiting parts 1.5–2× in editing; keep the block messages at normal speed.
+- Use the scene titles the script prints (`[n/5] …`) as captions.
 
-## 6. 체크리스트
+## 6. Checklist
 
-- [ ] `./ctl.sh health` 정상, 워밍업 완료
-- [ ] 화면에 계정 ID·자격 증명·실명·사내 정보 없음
-- [ ] 방해 금지, 알림 꺼짐
-- [ ] 글꼴 18pt 이상, 오른쪽 판정 로그 창 실행 중
-- [ ] 장면 1–5 촬영, 장면 4 확률값 확대 컷
-- [ ] 촬영 후 비용 정리: `./ctl.sh stop` 또는 `./destroy.sh`
+- [ ] `make health` is OK and you warmed up
+- [ ] no account IDs, credentials, real names or internal information on screen
+- [ ] Do Not Disturb on, notifications off
+- [ ] font ≥ 18 pt, decision log running on the right
+- [ ] scenes 1–5 recorded, plus a close-up of the scene 4 probabilities
+- [ ] afterwards, stop paying for the GPU: `make stop` or `make destroy`

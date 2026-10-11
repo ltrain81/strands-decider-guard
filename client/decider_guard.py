@@ -26,7 +26,48 @@ DEFAULTS = {
     "fail_mode": "closed",        # closed: block when the guard is unreachable; open: allow with a warning
     "max_file_bytes": 262144,
     "override_token": "#pii-ok",  # a prompt starting with this passes an "ask" (uncertain) verdict, never a "block"
+    "language": None,             # en | ko; default: from LANG / LC_ALL (ko_* -> ko, else en)
 }
+
+MSG = {
+    "en": {
+        "blocked": "[PII guard] Sensitive data detected; blocked ({where}).",
+        "ask": "[PII guard] Possible sensitive data; confirmation needed ({where}).",
+        "default_hint": "Mask it or leave that data out and try again.",
+        "prompt": "prompt", "tool": "tool {tool}", "bash_output": "Bash output",
+        "output_hidden": "(the command output was hidden by the PII guard)",
+        "kiro_warning": "[PII guard] The previous user message appears to contain sensitive data. Do not repeat, store, "
+                        "write to files or send those values anywhere; ask the user to mask them and resend. Reason: {why}",
+        "override": "If this is a false positive, resend the prompt starting with {token}",
+        "guard_failed": "guard call failed: {e}",
+        "failed_open": "[PII guard] check failed, allowing (fail_mode=open): {e}",
+        "failed_closed": "[PII guard] check failed, blocking (fail_mode=closed): {e}",
+    },
+    "ko": {
+        "blocked": "[PII guard] 민감 정보가 감지되어 차단했습니다 ({where}).",
+        "ask": "[PII guard] 민감 정보로 의심되어 확인이 필요합니다 ({where}).",
+        "default_hint": "마스킹하거나 해당 데이터를 제외하고 다시 시도하세요.",
+        "prompt": "프롬프트", "tool": "도구 {tool}", "bash_output": "Bash 출력",
+        "output_hidden": "(명령 출력은 PII guard 가 가렸습니다)",
+        "kiro_warning": "[PII guard] 직전 사용자 메시지에 민감 정보가 포함된 것으로 판단되었습니다. 그 값을 반복, 저장, 파일 기록, "
+                        "외부 전송하지 말고, 사용자에게 마스킹 후 다시 요청하도록 안내하세요. 판단 근거: {why}",
+        "override": "오탐이라면 프롬프트 앞에 {token} 를 붙여 다시 보내세요.",
+        "guard_failed": "guard 호출 실패: {e}",
+        "failed_open": "[PII guard] 검사 실패, 통과시킴 (fail_mode=open): {e}",
+        "failed_closed": "[PII guard] 검사 중 오류가 발생해 차단했습니다 (fail_mode=closed): {e}",
+    },
+}
+
+
+def language(cfg):
+    if cfg.get("language") in MSG:
+        return cfg["language"]
+    loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+    return "ko" if loc.lower().startswith("ko") else "en"
+
+
+def m(cfg, key, **kw):
+    return MSG[language(cfg)][key].format(**kw)
 READ_VERBS = {"cat", "head", "tail", "less", "more", "bat", "jq", "sed", "awk", "grep", "rg", "cut", "sort", "uniq", "column", "csvlook", "xsv"}
 
 
@@ -52,8 +93,8 @@ def call_guard(cfg, items, client):
                 policy = json.load(f)
         except FileNotFoundError:
             pass
-        return guard_core.check_many(items, cfg["decider_url"], policy)
-    payload = {"items": items, "client": client}
+        return guard_core.check_many(items, cfg["decider_url"], policy, language(cfg))
+    payload = {"items": items, "client": client, "lang": language(cfg)}
     try:
         import boto3
         from botocore.config import Config
@@ -186,14 +227,13 @@ def audit(entry):
         pass
 
 
-def block_message(decision, reasons, where, custom=""):
-    head = "[PII guard] 민감 정보가 감지되어 차단했습니다" if decision == "block" else "[PII guard] 민감 정보로 의심되어 확인이 필요합니다"
-    lines = [f"{head} ({where})."] + [f"  - {r}" for r in reasons[:6]]
-    lines.append(f"  {custom.strip() or '마스킹하거나 해당 데이터를 제외하고 다시 시도하세요.'}")
+def block_message(cfg, decision, reasons, where, custom=""):
+    lines = [m(cfg, "blocked" if decision == "block" else "ask", where=where)] + [f"  - {r}" for r in reasons[:6]]
+    lines.append(f"  {custom.strip() or m(cfg, 'default_hint')}")
     return "\n".join(lines)
 
 
-def emit(agent, event, decision, message):
+def emit(cfg, agent, event, decision, message, reasons):
     """Write the agent-specific hook response and return the exit code."""
     if decision == "allow":
         return 0
@@ -206,13 +246,13 @@ def emit(agent, event, decision, message):
                                                      "permissionDecisionReason": message}}, ensure_ascii=False))
         elif event == "PostToolUse":
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": {
-                "stdout": message + "\n(명령 출력은 PII guard 가 가렸습니다)", "stderr": "", "interrupted": False, "isImage": False}}}, ensure_ascii=False))
+                "stdout": message + "\n" + m(cfg, "output_hidden"), "stderr": "", "interrupted": False, "isImage": False}}}, ensure_ascii=False))
         return 0
     if agent == "kiro":
         if event == "UserPromptSubmit":
             # Kiro CLI cannot block a prompt: steer the model instead (without repeating the values).
-            print("[PII guard] 직전 사용자 메시지에 민감 정보가 포함된 것으로 판단되었습니다. 그 값을 반복, 저장, 파일 기록, 외부 전송하지 말고, "
-                  "사용자에게 마스킹 후 다시 요청하도록 안내하세요. 판단 근거: " + "; ".join(r.split("(")[0].strip() for r in message.splitlines()[1:-1]))
+            why = "; ".join(r.split(" (")[0] for r in reasons)  # labels only, never the (masked) values
+            print(m(cfg, "kiro_warning", why=why))
             return 0
         print(message, file=sys.stderr)
         return 2
@@ -234,12 +274,12 @@ def run_hook(agent):
     cwd = ev.get("cwd")
     if event == "UserPromptSubmit":
         prompt = ev.get("prompt", "")
-        items, where = [{"source": "prompt", "text": prompt}], "프롬프트"
+        items, where = [{"source": "prompt", "text": prompt}], m(cfg, "prompt")
     elif event == "PreToolUse":
-        items, where = tool_items(agent, tool, ev.get("tool_input"), cwd, cfg), f"도구 {tool}"
+        items, where = tool_items(agent, tool, ev.get("tool_input"), cwd, cfg), m(cfg, "tool", tool=tool)
     elif event == "PostToolUse" and agent == "claude" and tool == "Bash":
         resp = ev.get("tool_response") or {}
-        items, where = [{"source": "bash-output", "text": f"{resp.get('stdout', '')}\n{resp.get('stderr', '')}".strip()}], "Bash 출력"
+        items, where = [{"source": "bash-output", "text": f"{resp.get('stdout', '')}\n{resp.get('stderr', '')}".strip()}], m(cfg, "bash_output")
         items = [i for i in items if i["text"]]
     else:
         return 0
@@ -252,14 +292,14 @@ def run_hook(agent):
         decision, reasons = verdict["decision"], summarize(verdict)
     except Exception as e:
         decision = "block" if cfg["fail_mode"] == "closed" else "allow"
-        reasons = [f"guard 호출 실패: {str(e)[:200]}"]
+        reasons = [m(cfg, "guard_failed", e=str(e)[:200])]
         if decision == "allow":
-            print(f"[PII guard] 검사 실패, 통과시킴 (fail_mode=open): {str(e)[:200]}", file=sys.stderr)
+            print(m(cfg, "failed_open", e=str(e)[:200]), file=sys.stderr)
         verdict = {"results": []}
     if decision == "ask" and event == "UserPromptSubmit":
         decision = "allow" if items[0]["text"].lstrip().startswith(cfg["override_token"]) else "block"
         if decision == "block":
-            reasons.append(f"오탐이라면 프롬프트 앞에 {cfg['override_token']} 를 붙여 다시 보내세요.")
+            reasons.append(m(cfg, "override", token=cfg["override_token"]))
     if decision == "ask" and agent != "claude":
         decision = "block"  # only Claude Code can show an ask dialog
     if decision == "ask" and event == "PostToolUse":
@@ -268,7 +308,7 @@ def run_hook(agent):
     audit({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "agent": agent, "event": event, "tool": tool, "decision": decision,
            "types": sorted({f["type"] for r in verdict.get("results", []) for f in r.get("findings", [])}),
            "sources": [i["source"] for i in items], "ms": round((time.time() - t0) * 1000)})
-    return emit(agent, event, decision, block_message(decision, reasons, where, verdict.get("message", "")))
+    return emit(cfg, agent, event, decision, block_message(cfg, decision, reasons, where, verdict.get("message", "")), reasons)
 
 
 def main():
@@ -279,11 +319,12 @@ def main():
         try:
             sys.exit(run_hook(cmd))
         except Exception as e:  # malformed event, bad config...: follow fail_mode rather than crash
-            if load_config()["fail_mode"] != "closed":
-                print(f"[PII guard] 오류, 통과시킴 (fail_mode=open): {e}", file=sys.stderr)
+            cfg = load_config()
+            if cfg["fail_mode"] != "closed":
+                print(m(cfg, "failed_open", e=e), file=sys.stderr)
                 sys.exit(0)
             # Exit 2 blocks the prompt / tool call in all three agents (except Kiro prompts, which cannot be blocked).
-            print(f"[PII guard] 검사 중 오류가 발생해 차단했습니다 (fail_mode=closed): {str(e)[:200]}", file=sys.stderr)
+            print(m(cfg, "failed_closed", e=str(e)[:200]), file=sys.stderr)
             sys.exit(2)
     cfg = load_config()
     if cmd == "check":
