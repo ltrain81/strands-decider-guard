@@ -193,6 +193,7 @@ Measured on synthetic samples with the balanced preset:
 - Custom rules written in Korean were right on 9 of 10 sentences.
 - **Latency:** about 200–300 ms per check with the model on an Apple-silicon Mac. End to end through
   hook → Lambda → GPU, Claude Code saw 0.3–0.65 s per hook. Regex-only blocks take under 1 ms.
+- **Benchmark on public datasets** (ai4privacy, Gretel, Nemotron-PII, k-pii-bench, ~2,000 samples) and a side-by-side with Amazon Bedrock Guardrails: [bench/RESULTS.md](bench/RESULTS.md), [bench/COMPARISON.md](bench/COMPARISON.md). Short version: very few false positives and strong company rules, but recall on English public PII sets is 42 % at balanced (Guardrails: 78–93 %, with 3–8× more false positives).
 - These are a few dozen synthetic sentences, not a benchmark. Check your own data on the console's Test tab
   before relying on it.
 

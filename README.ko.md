@@ -209,6 +209,7 @@ make destroy                   # 전체 삭제 (스택 이름을 입력해 확�
   - Apple 실리콘 Mac 에서 모델 검사 1회 약 200–300ms
   - hook → Lambda → GPU 전체 경로는 Claude Code 실측 기준 hook 1회당 0.3–0.65초
   - 정규식만으로 막히는 경우 1ms 이하
+- **공개 데이터셋 벤치마크** (ai4privacy, Gretel, Nemotron-PII, k-pii-bench, 약 2,000건)와 Amazon Bedrock Guardrails 비교: [bench/RESULTS.md](bench/RESULTS.md), [bench/COMPARISON.md](bench/COMPARISON.md). 요약하면 오탐이 매우 적고 회사 규칙이 강하지만, 영어 공개 PII 세트의 재현율은 보통 기준 42% 입니다 (Guardrails 78–93%, 대신 오탐이 3–8배).
 - 수십 개의 합성 문장일 뿐 벤치마크가 아닙니다. 쓰기 전에 콘솔 테스트 탭에서 실제 업무 문장으로 확인하세요.
 
 ## 한계
