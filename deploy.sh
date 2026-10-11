@@ -130,7 +130,7 @@ step "Smoke test"
 invoke_guard '{"text": "warm up"}' >/dev/null
 for t in "Customer John Smith, SSN 123-45-6789, lives at 42 Elm St" "주민등록번호 900101-1234567 고객 조회" \
          "Patient Maria Garcia was diagnosed with HIV in 2021" "Show me an S3 bucket policy for cross-account access"; do
-  D="$(invoke_guard "$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$t")" | python3 -c 'import json,sys; r=json.load(sys.stdin); print(f"{r[\"decision\"]:5} {r[\"results\"][0][\"latency_ms\"]:7.1f} ms")')"
+  D="$(invoke_guard "$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$t")" | python3 -c 'import json,sys; r=json.load(sys.stdin); print("%-5s %7.1f ms" % (r["decision"], r["results"][0]["latency_ms"]))')"
   echo "  $D  <- $t"
 done
 
