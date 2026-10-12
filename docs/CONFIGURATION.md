@@ -33,7 +33,7 @@ the detection policy is edited in the [policy console](ADMIN.md). This page list
 |---|---|
 | `--outputs outputs.json` | Read the guard name and region from a deployment |
 | `--function-name N --region R` | Same, by hand |
-| `--auth jwt` | With `--outputs`: backend `api`, developers sign in in the browser and need no AWS credentials. Runs `decider-guard login` before the smoke test |
+| `--auth jwt\|iam` | With `--outputs` the default is `jwt` (backend `api`: browser sign-in, no AWS credentials; runs `decider-guard login` before the smoke test). `iam` uses the developer's AWS credentials instead ([IAM mode](SIGN_IN.md#iam-mode-advanced)) |
 | `--api-url U --client-id C --issuer I` | Same, by hand (or `--authorize-url` + `--token-url` instead of `--issuer`). This is what you hand to developers without `outputs.json` |
 | `--no-login` | With `--auth jwt`: skip the sign-in and the smoke test |
 | `--local [--decider-url URL]` | Local backend; needs a running decider (`scripts/local-decider.sh start`) |
@@ -132,7 +132,7 @@ The CDK context lives in `cdk/cdk.json`. Override a value with `-c key=value` in
 | `schedule`, `scheduleUtcOffset` | — , `9` | run the host only in this window, e.g. `MON-FRI 08:00-20:00` (`./deploy.sh --schedule … --utc-offset 9`); kept across redeploys, `--schedule none` removes it |
 | `evidenceDays` | `30` | days before kept original text is deleted (evidence bucket lifecycle rule) |
 | `network` | `nat` | `nat`: GPU host in a private subnet with no public IP, internet through one NAT Gateway (~$43/month in Seoul). `public`: host in a public subnet with a public IP and no NAT (the security group still admits only the guard). `--network`; kept across redeploys; switching replaces the host |
-| `devIssuer`, `devAudience` | — | trust an external OIDC IdP (Okta, Entra ID, …) for developer sign-in instead of the stack's developer user pool; `devAudience` is the client id the hooks use. See [SIGN_IN.md](SIGN_IN.md) |
+| `devIssuer`, `devAudience` | — | (the sign-in API and developer pool are created with or without the console) trust an external OIDC IdP (Okta, Entra ID, …) for developer sign-in instead of the stack's developer user pool; `devAudience` is the client id the hooks use. See [SIGN_IN.md](SIGN_IN.md) |
 | `devSessionDays` | `30` | how long a developer sign-in lasts (Cognito refresh token) before `decider-guard login` is needed again |
 | `spot` | `false` | run the host on Spot, a persistent request that stops on interruption (`--spot` / `--on-demand`; switching replaces the host) |
 
@@ -218,8 +218,8 @@ with your device-management tool:
 | Who | Needs |
 |---|---|
 | Whoever runs `deploy.sh` | CloudFormation, plus permission to create the stack's resources (EC2, VPC, Lambda, IAM roles, S3, CloudFront, Cognito, API Gateway, Logs). The usual CDK bootstrap roles cover this |
-| Each developer (hook, `backend: api`) | no AWS access: a developer sign-in (`make add-dev DEV_EMAIL=…`, or your IdP if federated) |
-| Each developer (hook, `backend: lambda`) | the `InvokePolicyArn` managed policy only: `lambda:InvokeFunction` on the guard |
+| Each developer (hook, sign-in, the default) | no AWS access: an invitation from the Developers tab (or `make add-dev`, or your IdP) |
+| Each developer (hook, IAM mode, advanced) | the `InvokePolicyArn` managed policy only: `lambda:InvokeFunction` on the guard |
 | LiteLLM host (`backend: lambda`) | the same `InvokePolicyArn` policy |
 | Console admins | a Cognito user (`make add-admin`); no AWS access needed |
 

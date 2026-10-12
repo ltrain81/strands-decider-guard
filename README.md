@@ -43,9 +43,10 @@ More detail: [Configuration reference](docs/CONFIGURATION.md) · [Policy console
 
 ![Architecture: hooks on the developer machine call a guard Lambda, which asks strands-decider on a GPU host; admins edit the policy in a console](docs/images/architecture.png)
 
-1. The hook sends the prompt, or the tool input and the file it touches, to the guard Lambda. With an AWS deployment each machine uses one of two modes:
-   ① **IAM** (`lambda:Invoke` with the developer's AWS credentials) or ①′ **sign-in** (an ID token to API Gateway, which checks it and
-   passes the user and groups on). One deployment serves both; [docs/SIGN_IN.md](docs/SIGN_IN.md) compares them.
+1. The hook sends the prompt, or the tool input and the file it touches, to the guard Lambda. Developer machines **sign in** (①′): the hook sends an ID token to
+   API Gateway, which checks it and passes the user and groups on. No AWS credentials are needed.
+   ① **IAM** (`lambda:Invoke`) is for services: the LiteLLM guardrail, the console's test tab and the operations commands.
+   Teams that already give every developer AWS credentials can use it for hooks too ([IAM mode](docs/SIGN_IN.md#iam-mode-advanced)).
    The third mode, **local** (`make local`), needs no AWS at all: the hook runs the engine itself against strands-decider on the same machine.
 2. The guard runs the regexes, then makes **one** call to strands-decider on the GPU host over a private IP.
 3. It applies the current policy, read from S3 through a gateway endpoint and cached for 30 s.
@@ -142,22 +143,16 @@ and needs no AWS access.
      request a quota increase or deploy with `DEPLOY_ARGS="--network public"` (host in a public subnet, no NAT).
    - It ends with a smoke test and prints the console URL. Cognito emails you a temporary password.
      Add more console admins with `make add-admin ADMIN_EMAIL=…`.
-2. Choose how developers' hooks authenticate:
-
-   | | Sign-in (`--auth jwt`, recommended) | IAM |
-   |---|---|---|
-   | Developers need | an email invitation from the console's **Developers** tab (or `make add-dev DEV_EMAIL=…`), or your company IdP ([docs/SIGN_IN.md](docs/SIGN_IN.md)) | AWS credentials with the **`InvokePolicyArn`** managed policy (`lambda:InvokeFunction` on the guard only) |
-   | Who made each request | logged, from the verified token | not logged |
-   | Session | 30 days, then `decider-guard login` | as long as their AWS credentials |
-
-3. **Sign-in:** invite people in the console's **Developers** tab, optionally into groups. The email links to the install page
+2. Invite developers in the console's **Developers** tab, optionally into groups. The email links to the install page
    (`<console URL>/install.html`) with a one-line installer, so developers need neither AWS access nor this repository.
-   **IAM:** give each developer `outputs.json` (no secrets: names, ARNs and URLs) and the [developer steps](#developer-each-machine).
+   Without the console (`--no-console`), use `make add-dev DEV_EMAIL=…` and send the install command from `outputs.json`.
+   With your company IdP instead of invitations, see [docs/SIGN_IN.md](docs/SIGN_IN.md).
+3. Every decision is logged with the signed-in person and their groups. Sessions last 30 days, then `decider-guard login`.
 4. Day to day:
    - `make console` opens the policy console: policy, test, logs (with the user), alerts. See the [console guide](docs/ADMIN.md).
    - `make status`, `make stop` / `make start` (the GPU host is the main cost; see [Operations and cost](#operations-and-cost)).
    - Developers tab: invite, resend, disable or delete sign-ins and manage groups ([console guide](docs/ADMIN.md#developers-tab)). Every decision is logged with the person and their groups.
-5. Protect your own machine too: `make add-dev DEV_EMAIL=<your email>` then `make install AUTH=jwt` (or `make install` for IAM).
+5. Protect your own machine too: `make add-dev DEV_EMAIL=<your email>`, then `make install` (signs you in).
 
 ### Developer (each machine)
 
@@ -187,7 +182,8 @@ Options:
 - `--agents claude,codex,kiro` adds Kiro (opt-in).
 - `--language ko` switches the messages to Korean.
 - `--claude-bedrock --bedrock-region us-west-2` also points Claude Code at Amazon Bedrock.
-- IAM instead of sign-in: drop `--auth jwt` and add `--profile <profile>`.
+- Advanced: teams that already give every developer AWS credentials (IAM Identity Center) can use `--auth iam --profile <profile>`
+  instead of signing in. See [IAM mode](docs/SIGN_IN.md#iam-mode-advanced) for the trade-offs.
 
 ## What is checked in each agent
 

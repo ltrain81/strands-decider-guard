@@ -197,7 +197,7 @@ fi
 step "Next"
 if [ -n "$INSTALL" ]; then
   P=(); [ -n "$PROFILE" ] && P=(--profile "$PROFILE")
-  "$ROOT/client/install.sh" --outputs "$OUTPUTS" "${P[@]}" "${CLIENT_ARGS[@]}"
+  "$ROOT/client/install.sh" --outputs "$OUTPUTS" --auth iam "${P[@]}" "${CLIENT_ARGS[@]}"   # the deployer's own AWS credentials
 else
   echo "  Install the hooks on each developer machine (their IAM identity needs the InvokePolicyArn output policy):"
   echo "    client/install.sh --outputs outputs.json${PROFILE:+ --profile $PROFILE}"

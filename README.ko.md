@@ -48,9 +48,10 @@ UserPromptSubmit operation blocked by hook:
 
 ![아키텍처: 개발자 PC 의 hook 이 guard Lambda 를 호출하고, guard 는 GPU 호스트의 strands-decider 에 묻습니다. 관리자는 콘솔에서 정책을 편집합니다](docs/images/architecture.png)
 
-1. hook 이 프롬프트, 또는 도구 입력과 그 도구가 다루는 파일을 guard Lambda 로 보냅니다. AWS 배포를 쓰면 PC 마다 두 방식 중 하나를 씁니다:
-   ① **IAM** (개발자 AWS 자격 증명으로 `lambda:Invoke`) 또는 ①′ **로그인** (ID 토큰을 API Gateway 로 보내면 검증 후 사용자와 그룹을 함께 전달).
-   한 배포가 두 방식을 모두 받습니다. 비교는 [docs/SIGN_IN.ko.md](docs/SIGN_IN.ko.md).
+1. hook 이 프롬프트, 또는 도구 입력과 그 도구가 다루는 파일을 guard Lambda 로 보냅니다. 개발자 PC 는 **로그인** 방식(①′)을 씁니다. hook 이 ID 토큰을
+   API Gateway 로 보내면 검증한 뒤 사용자와 그룹을 함께 넘깁니다. AWS 자격 증명은 필요 없습니다.
+   ① **IAM** (`lambda:Invoke`)은 서비스용입니다: LiteLLM guardrail, 콘솔의 테스트 탭, 운영 명령.
+   이미 모든 개발자에게 AWS 자격 증명을 주는 조직이라면 hook 에도 쓸 수 있습니다 ([IAM 방식](docs/SIGN_IN.ko.md#iam-방식-고급)).
    세 번째인 **로컬** 방식(`make local`)은 AWS 가 전혀 필요 없습니다. hook 이 같은 PC 의 strands-decider 로 엔진을 직접 실행합니다.
 2. guard 는 정규식을 먼저 보고, GPU 호스트의 strands-decider 를 private IP 로 **한 번** 호출합니다.
 3. S3 게이트웨이 엔드포인트로 읽은 현재 정책을 적용합니다 (30초 캐시).
@@ -146,22 +147,16 @@ cd demo/ko && claude
      쿼터 증설을 요청하거나 `DEPLOY_ARGS="--network public"` 으로 배포하세요 (퍼블릭 서브넷, NAT 없음).
    - 마지막에 스모크 테스트를 하고 콘솔 주소를 출력합니다. Cognito 가 임시 비밀번호를 메일로 보냅니다.
      콘솔 관리자 추가는 `make add-admin ADMIN_EMAIL=…`.
-2. 개발자 hook 의 인증 방식을 정합니다:
-
-   | | 로그인 (`--auth jwt`, 권장) | IAM |
-   |---|---|---|
-   | 개발자에게 필요한 것 | 콘솔 **개발자** 탭에서 보내는 초대 메일 (또는 `make add-dev DEV_EMAIL=…`), 또는 회사 IdP ([docs/SIGN_IN.ko.md](docs/SIGN_IN.ko.md)) | **`InvokePolicyArn`** 관리형 정책이 붙은 AWS 자격 증명 (guard 에 대한 `lambda:InvokeFunction` 만) |
-   | 요청한 사람 기록 | 검증된 토큰에서 기록 | 기록 안 됨 |
-   | 세션 | 30일, 이후 `decider-guard login` | AWS 자격 증명이 유효한 동안 |
-
-3. **로그인 방식:** 콘솔 **개발자** 탭에서 초대합니다 (그룹 지정 가능). 메일에 설치 페이지(`<콘솔 주소>/install.html`) 링크가 있고,
+2. 콘솔 **개발자** 탭에서 개발자를 초대합니다 (그룹 지정 가능). 메일에 설치 페이지(`<콘솔 주소>/install.html`) 링크가 있고,
    그 페이지의 한 줄 명령으로 설치하므로 개발자는 AWS 접근도, 이 저장소도 필요 없습니다.
-   **IAM 방식:** 개발자에게 `outputs.json` (비밀 정보 없음: 이름, ARN, URL)과 [개발자 설치 순서](#개발자-각-pc)를 전달합니다.
+   콘솔 없이 배포했다면(`--no-console`) `make add-dev DEV_EMAIL=…` 로 계정을 만들고 `outputs.json` 의 값으로 설치 명령을 보내세요.
+   초대 대신 회사 IdP 를 쓰려면 [docs/SIGN_IN.ko.md](docs/SIGN_IN.ko.md) 를 보세요.
+3. 판정 로그마다 로그인한 사람과 그룹이 남습니다. 세션은 30일이고, 그 뒤에는 `decider-guard login`.
 4. 운영:
    - `make console` 로 정책 콘솔을 엽니다: 정책, 테스트, 로그(사용자 포함), 알림. [콘솔 가이드](docs/ADMIN.ko.md) 참고.
    - `make status`, `make stop` / `make start` (GPU 호스트가 주요 비용입니다. [운영과 비용](#운영과-비용) 참고).
    - 개발자 탭: 초대, 재발송, 비활성화, 삭제와 그룹 관리 ([콘솔 가이드](docs/ADMIN.ko.md#개발자-탭)). 판정 로그마다 사람과 그룹이 남습니다.
-5. 관리자 PC 도 보호하세요: `make add-dev DEV_EMAIL=<내 메일>` 후 `make install AUTH=jwt` (IAM 방식은 `make install`).
+5. 관리자 PC 도 보호하세요: `make add-dev DEV_EMAIL=<내 메일>` 후 `make install` (로그인합니다).
 
 ### 개발자 (각 PC)
 
@@ -191,7 +186,8 @@ client/install.sh --outputs outputs.json --auth jwt   # 브라우저가 열림: 
 - `--agents claude,codex,kiro`: Kiro 추가 (선택).
 - `--language ko`: 메시지를 한국어로.
 - `--claude-bedrock --bedrock-region us-west-2`: Claude Code 를 Amazon Bedrock 으로 연결.
-- 로그인 대신 IAM 방식: `--auth jwt` 를 빼고 `--profile <프로필>` 을 붙입니다.
+- 고급: 이미 모든 개발자에게 AWS 자격 증명(IAM Identity Center)을 주는 조직은 로그인 대신 `--auth iam --profile <프로필>` 을
+  쓸 수 있습니다. 장단점은 [IAM 방식](docs/SIGN_IN.ko.md#iam-방식-고급)을 보세요.
 
 ## 에이전트별 검사 범위
 

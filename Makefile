@@ -5,7 +5,7 @@ REGION       ?=
 PROFILE      ?=
 ADMIN_EMAIL  ?=
 DEV_EMAIL    ?=
-AUTH         ?= iam
+AUTH         ?=
 AGENTS       ?= claude,codex
 LANGUAGE     ?=
 DEPLOY_ARGS  ?=
@@ -44,8 +44,8 @@ preflight: ## check AWS credentials, GPU quota and IAM headroom without deployin
 deploy: ## deploy to AWS (REGION=..., ADMIN_EMAIL=..., SCHEDULE="MON-FRI 08:00-20:00" optional)
 	@./deploy.sh $(aws_args) $(if $(ADMIN_EMAIL),--admin-email $(ADMIN_EMAIL)) $(if $(SCHEDULE),--schedule "$(SCHEDULE)") $(DEPLOY_ARGS)
 
-install: ## install the hooks against the AWS deployment (reads outputs.json; AUTH=jwt: browser sign-in, no AWS credentials)
-	@client/install.sh --outputs outputs.json --auth $(AUTH) $(if $(PROFILE),--profile $(PROFILE)) $(install_args)
+install: ## install the hooks against the AWS deployment (reads outputs.json; browser sign-in, AUTH=iam for AWS credentials)
+	@client/install.sh --outputs outputs.json $(if $(AUTH),--auth $(AUTH)) $(if $(PROFILE),--profile $(PROFILE)) $(install_args)
 
 status: ## deployment status
 	@./ctl.sh status
@@ -61,7 +61,7 @@ add-admin: ## create a console login: make add-admin ADMIN_EMAIL=you@example.com
 	@./ctl.sh add-admin $(ADMIN_EMAIL)
 add-dev: ## create a developer sign-in for AUTH=jwt hooks: make add-dev DEV_EMAIL=...
 	@./ctl.sh add-dev $(DEV_EMAIL)
-login: ## sign this machine's hooks in again (AUTH=jwt)
+login: ## sign this machine's hooks in again
 	@$${DECIDER_GUARD_HOME:-$$HOME/.decider-guard}/bin/decider-guard login
 
 destroy: ## delete the AWS deployment (asks for confirmation)

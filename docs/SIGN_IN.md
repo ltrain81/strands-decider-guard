@@ -1,10 +1,9 @@
-# Developer sign-in (`--auth jwt`)
+# Developer sign-in
 
 [한국어](SIGN_IN.ko.md)
 
-By default the hook calls the guard Lambda with the developer's AWS credentials (`lambda:InvokeFunction`). That only
-works for people who have AWS access. With **sign-in**, developers log in once in the browser and the hook calls the
-guard with a token:
+Hooks installed from an AWS deployment **sign in**: developers log in once in the browser and the hook calls the guard
+with a token. Compared with handing out AWS credentials:
 - no AWS credentials on developer machines,
 - every decision in the log carries the signed-in user,
 - access is managed in one place (a user pool, or your company's IdP).
@@ -50,7 +49,7 @@ the admin pool, so a developer sign-in never opens the policy console.
 
 ## Admin: set it up
 
-1. Deploy with the console enabled (the default): `make deploy REGION=…`. The stack then has the sign-in API and the developer pool.
+1. Deploy: `make deploy REGION=…`. The sign-in API and the developer pool are always part of the stack, with or without the console.
    It adds no IAM role, because API Gateway calls the guard through a resource policy.
 2. Give developers a sign-in:
    - In the console's **Developers** tab, invite by email and pick groups ([console guide](ADMIN.md#developers-tab)), or run `make add-dev DEV_EMAIL=<address>`.
@@ -91,3 +90,24 @@ decider-guard logout
 - Port 8723 must be free on the developer's machine during sign-in.
 - Each check costs one API Gateway request (about $1 per million) on top of the Lambda.
 - The API's integration timeout is 30 s; checks normally take under 1 s.
+
+## IAM mode (advanced)
+
+The guard Lambda can also be invoked directly with AWS credentials (`lambda:InvokeFunction`). Services use this path:
+the LiteLLM guardrail (its IAM role), the console's test tab and `make health`. Hooks can use it too:
+
+```bash
+client/install.sh --outputs outputs.json --auth iam --profile <profile>
+```
+
+Consider it only when every developer already has AWS credentials, for example through IAM Identity Center, and a second
+sign-in is unwanted. Attach the **`InvokePolicyArn`** managed policy from the outputs to their identities.
+
+| | Sign-in (default) | IAM mode |
+|---|---|---|
+| Developers need | an invitation (or your IdP) | AWS credentials with `InvokePolicyArn` |
+| Who made each request | logged from the verified token, with groups | not logged |
+| Revoking access | Developers tab or IdP | IAM |
+
+To make sign-in the only way in for developers, do not give them `InvokePolicyArn`; the IAM path then stays open only to
+admins and services.

@@ -151,9 +151,20 @@ export class DeciderGuardStack extends cdk.Stack {
       statements: [new iam.PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [fn.functionArn] })],
     });
 
-    if (this.node.tryGetContext('console') !== 'false' && this.node.tryGetContext('console') !== false) {
-      this.adminConsole(fn, guardLogs, policyBucket, host, evidenceBucket, evidenceDays);
-    }
+    // One HTTP API: POST /guard/check for signed-in hooks (always), /api/* for the policy console (when enabled).
+    // Construct ids are unchanged from when both lived in adminConsole(), so existing deployments keep their URLs.
+    const consoleOn = this.node.tryGetContext('console') !== 'false' && this.node.tryGetContext('console') !== false;
+    const cdn = consoleOn ? this.consoleSite() : undefined;
+    const api = new apigw.HttpApi(this, 'AdminApi', cdn ? {
+      corsPreflight: {
+        allowOrigins: [`https://${cdn.dist.distributionDomainName}`],
+        allowMethods: [apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.PUT, apigw.CorsHttpMethod.POST],
+        allowHeaders: ['authorization', 'content-type', 'x-lang'],
+        maxAge: cdk.Duration.hours(1),
+      },
+    } : {});
+    const dev = this.developerSignIn(fn, api, cdn?.url);
+    if (cdn) this.adminConsole(fn, guardLogs, policyBucket, host, evidenceBucket, evidenceDays, api, cdn, dev);
 
     new cdk.CfnOutput(this, 'GuardFunctionName', { value: fn.functionName });
     new cdk.CfnOutput(this, 'GuardFunctionArn', { value: fn.functionArn });
@@ -165,12 +176,8 @@ export class DeciderGuardStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'EvidenceBucketName', { value: evidenceBucket.bucketName });
   }
 
-  /**
-   * Policy console: S3 + CloudFront static site, Cognito login, HTTP API -> admin Lambda.
-   * Adds exactly one IAM role (the admin Lambda's). The site files are uploaded by `ctl.sh publish-console`.
-   */
-  private adminConsole(guardFn: lambda.Function, guardLogs: logs.LogGroup, policyBucket: s3.Bucket, host: ec2.Instance,
-                       evidenceBucket: s3.Bucket, evidenceDays: number) {
+  /** Console site: S3 + CloudFront. Also serves the public developer install page (install.html, dev/*). */
+  private consoleSite() {
     const site = new s3.Bucket(this, 'ConsoleSite', {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL, enforceSSL: true, encryption: s3.BucketEncryption.S3_MANAGED,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
@@ -183,7 +190,80 @@ export class DeciderGuardStack extends cdk.Stack {
         responseHeadersPolicy: cloudfront.ResponseHeadersPolicy.SECURITY_HEADERS,
       },
     });
-    const consoleUrl = `https://${dist.distributionDomainName}/`;
+    return { site, dist, url: `https://${dist.distributionDomainName}/` };
+  }
+
+  /**
+   * Hook sign-in (install.sh --auth jwt, the default): developers sign in in the browser and the hook sends an ID token to
+   * POST /guard/check, so they need no AWS credentials and every decision is logged with the user and groups. A separate
+   * user pool keeps developer logins out of the admin console; federate it with your corporate IdP (SAML/OIDC) instead of
+   * inviting users. -c devIssuer=https://... -c devAudience=<client id> trusts an external OIDC IdP directly.
+   * API Gateway invokes the guard through a resource policy, so this adds no IAM role. Independent of the console.
+   */
+  private developerSignIn(guardFn: lambda.Function, api: apigw.HttpApi, consoleUrl?: string) {
+    const devIssuer = this.node.tryGetContext('devIssuer') as string | undefined;
+    let devAuthorizer: apigw.IHttpRouteAuthorizer;
+    let out: { issuer?: string; clientId: string; pool?: cognito.UserPool; authorizeUrl?: string; tokenUrl?: string };
+    if (devIssuer) {
+      const audience = this.node.tryGetContext('devAudience') as string | undefined;
+      if (!audience) throw new Error('devIssuer needs devAudience (the OIDC client id the hooks sign in with)');
+      devAuthorizer = new HttpJwtAuthorizer('DevAuth', devIssuer, { jwtAudience: [audience] });
+      new cdk.CfnOutput(this, 'DevIssuer', { value: devIssuer });
+      new cdk.CfnOutput(this, 'DevClientId', { value: audience });
+      out = { issuer: devIssuer, clientId: audience };
+    } else {
+      const install = consoleUrl
+        ? { en: `Install it as shown on ${consoleUrl}install.html ; the installer`, ko: `${consoleUrl}install.html 안내대로 설치하면` }
+        : { en: 'Your admin will send you the install command; it', ko: '관리자가 보내 주는 설치 명령을 실행하면' };
+      const devPool = new cognito.UserPool(this, 'Developers', {
+        selfSignUpEnabled: false,
+        signInAliases: { email: true },
+        autoVerify: { email: true },
+        passwordPolicy: { minLength: 12, requireSymbols: false },
+        accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
+        userInvitation: {
+          emailSubject: 'PII guard sign-in / PII 가드 로그인',
+          emailBody: `You are invited to the PII guard for coding agents. ${install.en} opens a sign-in page where you use this temporary password and then choose your own.<br>`
+            + `PII 가드에 초대되었습니다. ${install.ko} 로그인 페이지가 열립니다. 아래 임시 비밀번호로 로그인한 뒤 새 비밀번호를 정하세요.<br><br>`
+            + 'ID: {username}<br>Temporary password / 임시 비밀번호: {####}',
+        },
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      });
+      const devDomain = devPool.addDomain('DevLogin', { cognitoDomain: { domainPrefix: `decider-guard-dev-${this.account}` } });
+      const devClient = devPool.addClient('Hooks', {
+        generateSecret: false,
+        preventUserExistenceErrors: true,
+        oAuth: { flows: { authorizationCodeGrant: true }, scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL],
+                 callbackUrls: [DEV_CALLBACK], logoutUrls: [DEV_CALLBACK] },
+        idTokenValidity: cdk.Duration.hours(1),
+        accessTokenValidity: cdk.Duration.hours(1),
+        refreshTokenValidity: cdk.Duration.days(Number(this.node.tryGetContext('devSessionDays') ?? 30)),
+      });
+      devAuthorizer = new HttpUserPoolAuthorizer('DevAuth', devPool, { userPoolClients: [devClient] });
+      out = { clientId: devClient.userPoolClientId, pool: devPool,
+              authorizeUrl: `${devDomain.baseUrl()}/oauth2/authorize`, tokenUrl: `${devDomain.baseUrl()}/oauth2/token` };
+      new cdk.CfnOutput(this, 'DevUserPoolId', { value: devPool.userPoolId });
+      new cdk.CfnOutput(this, 'DevClientId', { value: out.clientId });
+      new cdk.CfnOutput(this, 'DevAuthorizeUrl', { value: out.authorizeUrl! });
+      new cdk.CfnOutput(this, 'DevTokenUrl', { value: out.tokenUrl! });
+    }
+    api.addRoutes({ path: '/guard/check', methods: [apigw.HttpMethod.POST], authorizer: devAuthorizer,
+                    integration: new HttpLambdaIntegration('GuardIntegration', guardFn) });
+    const guardApiUrl = `${api.apiEndpoint}/guard/check`;
+    new cdk.CfnOutput(this, 'GuardApiUrl', { value: guardApiUrl });
+    return { ...out, guardApiUrl };
+  }
+
+  /**
+   * Policy console: Cognito admin login, /api/* on the HTTP API -> admin Lambda, monitoring and the Developers tab.
+   * Adds exactly one IAM role (the admin Lambda's). The site files are uploaded by `ctl.sh publish-console`.
+   */
+  private adminConsole(guardFn: lambda.Function, guardLogs: logs.LogGroup, policyBucket: s3.Bucket, host: ec2.Instance,
+                       evidenceBucket: s3.Bucket, evidenceDays: number, api: apigw.HttpApi,
+                       cdn: { site: s3.Bucket; dist: cloudfront.Distribution; url: string },
+                       dev: ReturnType<DeciderGuardStack['developerSignIn']>) {
+    const { site, dist } = cdn;
+    const consoleUrl = cdn.url;
 
     const pool = new cognito.UserPool(this, 'Admins', {
       selfSignUpEnabled: false,
@@ -298,81 +378,26 @@ export class DeciderGuardStack extends cdk.Stack {
     });
     adminFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:GetQueryResults'], resources: ['*'] }));
 
-    const api = new apigw.HttpApi(this, 'AdminApi', {
-      corsPreflight: {
-        allowOrigins: [`https://${dist.distributionDomainName}`],
-        allowMethods: [apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.PUT, apigw.CorsHttpMethod.POST],
-        allowHeaders: ['authorization', 'content-type', 'x-lang'],
-        maxAge: cdk.Duration.hours(1),
-      },
-    });
     const authorizer = new HttpUserPoolAuthorizer('AdminAuth', pool, { userPoolClients: [client] });
     const integration = new HttpLambdaIntegration('AdminIntegration', adminFn);
     // One authorized catch-all route; handler.py does the routing. OPTIONS is left to the CORS preflight above.
     api.addRoutes({ path: '/api/{proxy+}', methods: [apigw.HttpMethod.GET, apigw.HttpMethod.PUT, apigw.HttpMethod.POST], integration, authorizer });
 
-    // Hook sign-in (install.sh --auth jwt): developers sign in in the browser and the hook sends an ID token to POST
-    // /guard/check, so they need no AWS credentials and every decision is logged with the user. A separate user pool keeps
-    // developer logins out of the admin console; federate it with your corporate IdP (SAML/OIDC) instead of inviting users.
-    // -c devIssuer=https://... -c devAudience=<client id> trusts an external OIDC IdP (Okta, Entra ID, ...) directly.
-    // API Gateway invokes the guard through a resource policy, so this adds no IAM role.
-    const devIssuer = this.node.tryGetContext('devIssuer') as string | undefined;
-    let devAuthorizer: apigw.IHttpRouteAuthorizer;
-    if (devIssuer) {
-      const audience = this.node.tryGetContext('devAudience') as string | undefined;
-      if (!audience) throw new Error('devIssuer needs devAudience (the OIDC client id the hooks sign in with)');
-      devAuthorizer = new HttpJwtAuthorizer('DevAuth', devIssuer, { jwtAudience: [audience] });
-      new cdk.CfnOutput(this, 'DevIssuer', { value: devIssuer });
-      adminFn.addEnvironment('DEV_ISSUER', devIssuer);
-      adminFn.addEnvironment('DEV_CLIENT_ID', audience);
-      new cdk.CfnOutput(this, 'DevClientId', { value: audience });
-    } else {
-      const devPool = new cognito.UserPool(this, 'Developers', {
-        selfSignUpEnabled: false,
-        signInAliases: { email: true },
-        autoVerify: { email: true },
-        passwordPolicy: { minLength: 12, requireSymbols: false },
-        accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
-        userInvitation: {
-          emailSubject: 'PII guard sign-in / PII 가드 로그인',
-          emailBody: `You are invited to the PII guard for coding agents. Install it as shown on ${consoleUrl}install.html ; `
-            + 'the installer opens a sign-in page where you use this temporary password and then choose your own.<br>'
-            + `PII 가드에 초대되었습니다. ${consoleUrl}install.html 안내대로 설치하면 로그인 페이지가 열립니다. 아래 임시 비밀번호로 로그인한 뒤 새 비밀번호를 정하세요.<br><br>`
-            + 'ID: {username}<br>Temporary password / 임시 비밀번호: {####}',
-        },
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      });
-      const devDomain = devPool.addDomain('DevLogin', { cognitoDomain: { domainPrefix: `decider-guard-dev-${this.account}` } });
-      const devClient = devPool.addClient('Hooks', {
-        generateSecret: false,
-        preventUserExistenceErrors: true,
-        oAuth: { flows: { authorizationCodeGrant: true }, scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL],
-                 callbackUrls: [DEV_CALLBACK], logoutUrls: [DEV_CALLBACK] },
-        idTokenValidity: cdk.Duration.hours(1),
-        accessTokenValidity: cdk.Duration.hours(1),
-        refreshTokenValidity: cdk.Duration.days(Number(this.node.tryGetContext('devSessionDays') ?? 30)),
-      });
-      devAuthorizer = new HttpUserPoolAuthorizer('DevAuth', devPool, { userPoolClients: [devClient] });
-      // Users tab: invite, disable, delete and group developers (permissions on the existing admin role, no new role).
+    // Developers tab: invite, disable, delete and group developers (permissions on the existing admin role, no new role).
+    adminFn.addEnvironment('GUARD_API_URL', dev.guardApiUrl);
+    adminFn.addEnvironment('DEV_CLIENT_ID', dev.clientId);
+    if (dev.issuer) adminFn.addEnvironment('DEV_ISSUER', dev.issuer);
+    if (dev.pool) {
       adminFn.addToRolePolicy(new iam.PolicyStatement({
         actions: ['cognito-idp:ListUsers', 'cognito-idp:AdminGetUser', 'cognito-idp:AdminCreateUser', 'cognito-idp:AdminDisableUser',
                   'cognito-idp:AdminEnableUser', 'cognito-idp:AdminDeleteUser', 'cognito-idp:AdminUserGlobalSignOut',
                   'cognito-idp:ListGroups', 'cognito-idp:CreateGroup', 'cognito-idp:DeleteGroup', 'cognito-idp:ListUsersInGroup',
                   'cognito-idp:AdminListGroupsForUser', 'cognito-idp:AdminAddUserToGroup', 'cognito-idp:AdminRemoveUserFromGroup'],
-        resources: [devPool.userPoolArn] }));
-      adminFn.addEnvironment('DEV_POOL_ID', devPool.userPoolId);
-      adminFn.addEnvironment('DEV_CLIENT_ID', devClient.userPoolClientId);
-      adminFn.addEnvironment('DEV_AUTHORIZE_URL', `${devDomain.baseUrl()}/oauth2/authorize`);
-      adminFn.addEnvironment('DEV_TOKEN_URL', `${devDomain.baseUrl()}/oauth2/token`);
-      new cdk.CfnOutput(this, 'DevUserPoolId', { value: devPool.userPoolId });
-      new cdk.CfnOutput(this, 'DevClientId', { value: devClient.userPoolClientId });
-      new cdk.CfnOutput(this, 'DevAuthorizeUrl', { value: `${devDomain.baseUrl()}/oauth2/authorize` });
-      new cdk.CfnOutput(this, 'DevTokenUrl', { value: `${devDomain.baseUrl()}/oauth2/token` });
+        resources: [dev.pool.userPoolArn] }));
+      adminFn.addEnvironment('DEV_POOL_ID', dev.pool.userPoolId);
+      adminFn.addEnvironment('DEV_AUTHORIZE_URL', dev.authorizeUrl!);
+      adminFn.addEnvironment('DEV_TOKEN_URL', dev.tokenUrl!);
     }
-    api.addRoutes({ path: '/guard/check', methods: [apigw.HttpMethod.POST], authorizer: devAuthorizer,
-                    integration: new HttpLambdaIntegration('GuardIntegration', guardFn) });
-    new cdk.CfnOutput(this, 'GuardApiUrl', { value: `${api.apiEndpoint}/guard/check` });
-    adminFn.addEnvironment('GUARD_API_URL', `${api.apiEndpoint}/guard/check`);
 
     new cdk.CfnOutput(this, 'AdminUrl', { value: consoleUrl });
     new cdk.CfnOutput(this, 'ConsoleBucketName', { value: site.bucketName });

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Install the PII guard hook for Claude Code / Kiro CLI / Codex CLI on this machine.
 #
-#   client/install.sh --outputs outputs.json                  # after ./deploy.sh (AWS backend)
-#   client/install.sh --function-name NAME --region REGION [--profile P]
+#   client/install.sh --outputs outputs.json                  # after ./deploy.sh: browser sign-in (default), no AWS credentials
+#   client/install.sh --outputs outputs.json --auth iam [--profile P]   # advanced: the developer's AWS credentials instead
+#   client/install.sh --function-name NAME --region REGION [--profile P]   # IAM, by hand
 #   client/install.sh --local [--decider-url http://127.0.0.1:8000]   # no AWS: local strands-decider server
-#   client/install.sh --outputs outputs.json --auth jwt       # developers sign in in the browser; no AWS credentials
 #   client/install.sh --api-url URL --client-id ID (--issuer URL | --authorize-url URL --token-url URL)   # same, by hand
 #   options: --agents claude,codex        which agents (default: claude,codex; add kiro to opt in, it can only block
 #                                         tool calls; 'none' = just ~/.decider-guard). --uninstall removes all three
@@ -20,7 +20,7 @@ ROOT="$(cd "$HERE/.." && pwd)"
 DEST="${DECIDER_GUARD_HOME:-$HOME/.decider-guard}"
 BACKEND=lambda FN="" REGION="" PROFILE="" URL="http://127.0.0.1:8000" AGENTS="" 
 FAIL=closed BEDROCK="" BEDROCK_REGION="" UNINSTALL="" OUTPUTS="" LANGUAGE=""
-AUTH=iam API_URL="" CLIENT_ID="" ISSUER="" AUTHORIZE_URL="" TOKEN_URL="" NO_LOGIN=""
+AUTH="" API_URL="" CLIENT_ID="" ISSUER="" AUTHORIZE_URL="" TOKEN_URL="" NO_LOGIN=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -57,6 +57,8 @@ fi
 
 if [ -n "$OUTPUTS" ]; then
   read -r FN REGION < <(python3 -c 'import json,sys; o=next(iter(json.load(open(sys.argv[1])).values())); print(o["GuardFunctionName"], o["Region"])' "$OUTPUTS")
+  # Sign-in is the default whenever the deployment has the sign-in API.
+  [ -z "$AUTH" ] && AUTH="$(python3 -c 'import json,sys; o=next(iter(json.load(open(sys.argv[1])).values())); print("jwt" if o.get("GuardApiUrl") else "iam")' "$OUTPUTS")"
   if [ "$AUTH" = jwt ]; then
     read -r API_URL CLIENT_ID ISSUER AUTHORIZE_URL TOKEN_URL < <(python3 -c 'import json,sys
 o = next(iter(json.load(open(sys.argv[1])).values()))
@@ -65,6 +67,7 @@ print(*(o.get(k) or "-" for k in ("GuardApiUrl", "DevClientId", "DevIssuer", "De
     for v in ISSUER AUTHORIZE_URL TOKEN_URL; do [ "${!v}" = - ] && printf -v "$v" ''; done
   fi
 fi
+AUTH="${AUTH:-iam}"   # --function-name by hand
 case "$AUTH" in iam) ;; jwt) BACKEND=api ;; *) echo "--auth must be iam or jwt" >&2; exit 2 ;; esac
 if [ "$BACKEND" = api ] && { [ -z "$API_URL" ] || [ -z "$CLIENT_ID" ] || { [ -z "$ISSUER" ] && [ -z "$TOKEN_URL" ]; }; }; then
   echo "--auth jwt needs --outputs, or --api-url, --client-id and --issuer (or --authorize-url + --token-url)" >&2; exit 2

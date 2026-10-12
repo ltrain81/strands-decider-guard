@@ -1,9 +1,9 @@
-# 개발자 로그인 (`--auth jwt`)
+# 개발자 로그인
 
 [English](SIGN_IN.md)
 
-기본 방식에서는 hook 이 개발자의 AWS 자격 증명으로 guard Lambda 를 호출합니다 (`lambda:InvokeFunction`). AWS 접근이 있는
-사람만 쓸 수 있는 방식입니다. **로그인** 방식에서는 개발자가 브라우저로 한 번 로그인하고, hook 은 토큰으로 guard 를 호출합니다.
+AWS 배포로 설치한 hook 은 **로그인** 방식을 씁니다. 개발자가 브라우저로 한 번 로그인하면 hook 이 토큰으로 guard 를 호출합니다.
+AWS 자격 증명을 나눠 주는 방식과 비교하면:
 - 개발자 PC 에 AWS 자격 증명이 필요 없습니다.
 - 판정 로그마다 로그인한 사용자가 남습니다.
 - 접근 권한을 한곳(사용자 풀 또는 회사 IdP)에서 관리합니다.
@@ -49,7 +49,7 @@
 
 ## 관리자: 설정
 
-1. 콘솔을 켠 상태(기본값)로 배포합니다: `make deploy REGION=…`. 그러면 스택에 로그인 API 와 개발자 풀이 생깁니다.
+1. 배포합니다: `make deploy REGION=…`. 로그인 API 와 개발자 풀은 콘솔 사용 여부와 관계없이 항상 스택에 들어 있습니다.
    API Gateway 는 리소스 정책으로 guard 를 호출하므로 IAM 역할은 늘지 않습니다.
 2. 개발자 로그인을 만듭니다.
    - 콘솔 **개발자** 탭에서 이메일로 초대하고 그룹을 고릅니다 ([콘솔 가이드](ADMIN.ko.md#개발자-탭)). 또는 `make add-dev DEV_EMAIL=<주소>`.
@@ -90,3 +90,23 @@ decider-guard logout
 - 로그인하는 동안 개발자 PC 의 8723 포트가 비어 있어야 합니다.
 - 검사마다 Lambda 외에 API Gateway 요청 1건(100만 건당 약 $1)이 추가됩니다.
 - API 의 통합 타임아웃은 30초입니다. 보통 검사는 1초 안에 끝납니다.
+
+## IAM 방식 (고급)
+
+guard Lambda 는 AWS 자격 증명으로 직접 호출할 수도 있습니다 (`lambda:InvokeFunction`). 서비스가 이 경로를 씁니다:
+LiteLLM guardrail(그 서버의 IAM 역할), 콘솔의 테스트 탭, `make health`. hook 도 이 경로를 쓸 수 있습니다:
+
+```bash
+client/install.sh --outputs outputs.json --auth iam --profile <프로필>
+```
+
+모든 개발자가 이미 AWS 자격 증명을 갖고 있고(예: IAM Identity Center) 로그인을 한 번 더 시키고 싶지 않을 때만 고려하세요.
+출력값의 **`InvokePolicyArn`** 관리형 정책을 개발자 자격 증명에 붙여야 합니다.
+
+| | 로그인 (기본) | IAM 방식 |
+|---|---|---|
+| 개발자에게 필요한 것 | 초대 (또는 회사 IdP) | `InvokePolicyArn` 이 붙은 AWS 자격 증명 |
+| 요청한 사람 기록 | 검증된 토큰에서 그룹과 함께 기록 | 기록 안 됨 |
+| 접근 회수 | 개발자 탭 또는 IdP | IAM |
+
+개발자가 로그인으로만 들어오게 하려면 `InvokePolicyArn` 을 주지 마세요. 그러면 IAM 경로는 관리자와 서비스에만 열립니다.
