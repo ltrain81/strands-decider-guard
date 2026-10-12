@@ -4,6 +4,7 @@
   decider_guard.py claude|kiro|codex   hook mode: reads the hook event JSON on stdin
   decider_guard.py check "some text"   manual check, prints the verdict
   decider_guard.py status              backend health
+  decider_guard.py login [--no-browser]   sign in (backend "api"); logout removes the saved token
 
 Config: ~/.decider-guard/config.json (written by install.sh). The audit log
 (~/.decider-guard/audit.log) records decisions and finding types, never the text.
@@ -18,7 +19,9 @@ import time
 
 HOME = os.environ.get("DECIDER_GUARD_HOME", os.path.expanduser("~/.decider-guard"))
 DEFAULTS = {
-    "backend": "lambda",          # lambda | local
+    "backend": "lambda",          # lambda (IAM) | api (sign-in, see login) | local
+    "api_url": "",                # backend api: POST endpoint (GuardApiUrl output)
+    "auth": {},                   # backend api: client_id + authorize_url/token_url, or issuer (OIDC discovery)
     "function_name": "",
     "region": None,
     "profile": None,
@@ -44,6 +47,13 @@ MSG = {
         "guard_failed": "guard call failed: {e}",
         "failed_open": "[PII guard] check failed, allowing (fail_mode=open): {e}",
         "failed_closed": "[PII guard] check failed, blocking (fail_mode=closed): {e}",
+        "login_needed": "not signed in to the PII guard, or the session expired",
+        "login_hint": "Sign in with: decider-guard login   (then retry)",
+        "login_open": "Opening the sign-in page. If no browser opens, visit:\n  {url}",
+        "login_paste": "Open this URL in a browser, sign in, then paste the address you land on (http://localhost:8723/...):\n  {url}\n> ",
+        "login_done": "Signed in as {user}. The session lasts until {until} unless revoked.",
+        "login_page": "Signed in to the PII guard. You can close this tab.",
+        "logout_done": "Signed out (token removed).",
     },
     "ko": {
         "blocked": "[PII guard] 민감 정보가 감지되어 차단했습니다 ({where}).",
@@ -59,6 +69,13 @@ MSG = {
         "guard_failed": "guard 호출 실패: {e}",
         "failed_open": "[PII guard] 검사 실패, 통과시킴 (fail_mode=open): {e}",
         "failed_closed": "[PII guard] 검사 중 오류가 발생해 차단했습니다 (fail_mode=closed): {e}",
+        "login_needed": "PII guard 에 로그인하지 않았거나 세션이 만료되었습니다",
+        "login_hint": "로그인하세요: decider-guard login   (그다음 다시 시도)",
+        "login_open": "로그인 페이지를 엽니다. 브라우저가 열리지 않으면 이 주소로 가세요:\n  {url}",
+        "login_paste": "브라우저에서 이 주소를 열어 로그인한 뒤, 도착한 주소(http://localhost:8723/...)를 붙여 넣으세요:\n  {url}\n> ",
+        "login_done": "{user} 로 로그인했습니다. 세션은 {until} 까지 유지됩니다.",
+        "login_page": "PII guard 에 로그인했습니다. 이 탭은 닫아도 됩니다.",
+        "logout_done": "로그아웃했습니다 (토큰 삭제).",
     },
 }
 
@@ -102,6 +119,8 @@ def call_guard(cfg, items, client):
         out["evidence"] = save_local_evidence(items, out, guard_core.normalize_policy(policy), client)
         return out
     payload = {"items": items, "client": client, "lang": language(cfg)}
+    if cfg["backend"] == "api":
+        return call_api(cfg, payload)
     try:
         import boto3
         from botocore.config import Config
@@ -151,6 +170,153 @@ def _invoke_with_cli(cfg, payload):
             raise RuntimeError(r.stderr.strip()[:300])
         with open(dst) as f:
             return json.load(f)
+
+
+# ---------- sign-in (backend "api") ----------
+# OAuth 2.0 authorization code + PKCE with a loopback redirect, like `aws sso login` or `gh auth login`: the browser
+# signs in at the IdP, the IdP redirects to this machine with a one-time code, and the code (plus the PKCE secret that
+# never left this process) is exchanged for tokens. The ID token (1 h) goes to the guard API; the refresh token
+# (default 30 days) renews it silently. Both live in token.json (0600). No AWS credentials are involved.
+
+TOKEN_FILE = os.path.join(HOME, "token.json")
+CALLBACK_PORT = 8723   # must match DEV_CALLBACK in cdk/lib/guard-stack.ts
+REDIRECT = f"http://localhost:{CALLBACK_PORT}/callback"
+
+
+class NotSignedIn(Exception):
+    pass
+
+
+def _http_json(url, data=None, headers=None, timeout=10):
+    import urllib.parse
+    import urllib.request
+    if isinstance(data, dict):
+        data = urllib.parse.urlencode(data).encode()
+        headers = {"Content-Type": "application/x-www-form-urlencoded", **(headers or {})}
+    with urllib.request.urlopen(urllib.request.Request(url, data, headers or {}), timeout=timeout) as r:
+        return json.load(r)
+
+
+def _endpoints(cfg):
+    a = dict(cfg.get("auth") or {})
+    if not (a.get("authorize_url") and a.get("token_url")) and a.get("issuer"):
+        d = _http_json(a["issuer"].rstrip("/") + "/.well-known/openid-configuration")
+        a.setdefault("authorize_url", d["authorization_endpoint"])
+        a.setdefault("token_url", d["token_endpoint"])
+    if not (a.get("client_id") and a.get("authorize_url") and a.get("token_url")):
+        raise RuntimeError("backend api needs auth.client_id and auth.issuer (or authorize_url + token_url) in config.json")
+    return a
+
+
+def _claims(jwt):
+    import base64
+    part = jwt.split(".")[1]
+    return json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+
+
+def _save_token(tok, old=None):
+    body = {"id_token": tok["id_token"], "refresh_token": tok.get("refresh_token") or (old or {}).get("refresh_token"),
+            "expires_at": time.time() + int(tok.get("expires_in", 3600))}
+    tmp = f"{TOKEN_FILE}.{os.getpid()}"
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        json.dump(body, f)
+    os.replace(tmp, TOKEN_FILE)   # atomic: hooks running in parallel never see half a file
+    return body
+
+
+def id_token(cfg):
+    """A valid ID token, refreshed when it expires within a minute. NotSignedIn when there is none to be had."""
+    import urllib.error
+    try:
+        with open(TOKEN_FILE) as f:
+            tok = json.load(f)
+    except (OSError, ValueError):
+        raise NotSignedIn()
+    if tok.get("expires_at", 0) - 60 > time.time():
+        return tok["id_token"]
+    if not tok.get("refresh_token"):
+        raise NotSignedIn()
+    a = _endpoints(cfg)
+    try:
+        new = _http_json(a["token_url"], {"grant_type": "refresh_token", "client_id": a["client_id"], "refresh_token": tok["refresh_token"]})
+    except urllib.error.HTTPError as e:
+        if e.code in (400, 401):   # refresh token expired, revoked, or the user was disabled
+            raise NotSignedIn()
+        raise
+    return _save_token(new, tok)["id_token"]
+
+
+def call_api(cfg, payload):
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(cfg["api_url"], json.dumps(payload).encode(),
+                                 {"Content-Type": "application/json", "Authorization": "Bearer " + id_token(cfg)})
+    try:
+        with urllib.request.urlopen(req, timeout=25) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            raise NotSignedIn()
+        raise RuntimeError(f"guard API HTTP {e.code}: {e.read()[:200].decode(errors='replace')}")
+
+
+def login(cfg, browser=True):
+    import base64
+    import hashlib
+    import http.server
+    import secrets
+    import urllib.parse
+    a = _endpoints(cfg)
+    verifier = secrets.token_urlsafe(48)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    state = secrets.token_urlsafe(16)
+    url = a["authorize_url"] + "?" + urllib.parse.urlencode({
+        "response_type": "code", "client_id": a["client_id"], "redirect_uri": REDIRECT, "scope": a.get("scope", "openid email"),
+        "state": state, "code_challenge": challenge, "code_challenge_method": "S256"})
+    got = {}
+    if browser:
+        page = m(cfg, "login_page").encode()
+
+        class Callback(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                u = urllib.parse.urlparse(self.path)
+                if u.path != "/callback":
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                got.update({k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()})
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(page)
+
+            def log_message(self, *args):
+                pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", CALLBACK_PORT), Callback)
+        srv.timeout = 1
+        print(m(cfg, "login_open", url=url), file=sys.stderr)
+        import webbrowser
+        webbrowser.open(url)
+        deadline = time.time() + 300
+        while not got and time.time() < deadline:
+            srv.handle_request()
+        srv.server_close()
+    else:   # SSH / no browser here: sign in elsewhere and paste the address the browser was sent to
+        back = input(m(cfg, "login_paste", url=url)).strip()
+        got = {k: v[0] for k, v in urllib.parse.parse_qs(urllib.parse.urlparse(back).query).items()}
+    if got.get("error"):
+        raise RuntimeError(f"sign-in failed: {got.get('error')} {got.get('error_description', '')}")
+    if not got.get("code"):
+        raise RuntimeError("sign-in timed out")
+    if got.get("state") != state:
+        raise RuntimeError("sign-in failed: state mismatch (stale or forged redirect)")
+    tok = _http_json(a["token_url"], {"grant_type": "authorization_code", "client_id": a["client_id"], "code": got["code"],
+                                      "redirect_uri": REDIRECT, "code_verifier": verifier})
+    _save_token(tok)
+    c = _claims(tok["id_token"])
+    days = int((cfg.get("auth") or {}).get("session_days", 30))
+    print(m(cfg, "login_done", user=c.get("email") or c.get("sub"), until=time.strftime("%Y-%m-%d", time.localtime(time.time() + days * 86400))))
 
 
 # ---------- what to inspect ----------
@@ -255,10 +421,10 @@ def audit(entry):
         pass
 
 
-def block_message(cfg, decision, reasons, where, custom="", unreachable=False):
+def block_message(cfg, decision, reasons, where, custom="", unreachable=False, signed_out=False):
     head = "unreachable" if unreachable else "blocked" if decision == "block" else "ask"
     lines = [m(cfg, head, where=where)] + [f"  - {r}" for r in reasons[:6]]
-    hint = m(cfg, "unreachable_hint") if unreachable else custom.strip() or m(cfg, "default_hint")
+    hint = m(cfg, "login_hint") if signed_out else m(cfg, "unreachable_hint") if unreachable else custom.strip() or m(cfg, "default_hint")
     lines.append(f"  {hint}")
     return "\n".join(lines)
 
@@ -317,14 +483,14 @@ def run_hook(agent):
         return 0
 
     t0 = time.time()
-    unreachable = False
+    unreachable = signed_out = False
     try:
         verdict = call_guard(cfg, items, agent)
         decision, reasons = verdict["decision"], summarize(verdict)
     except Exception as e:
         decision = "block" if cfg["fail_mode"] == "closed" else "allow"
-        unreachable = True
-        reasons = [m(cfg, "guard_failed", e=str(e)[:200])]
+        unreachable, signed_out = True, isinstance(e, NotSignedIn)
+        reasons = [m(cfg, "login_needed") if signed_out else m(cfg, "guard_failed", e=str(e)[:200])]
         if decision == "allow":
             print(m(cfg, "failed_open", e=str(e)[:200]), file=sys.stderr)
         verdict = {"results": []}
@@ -341,7 +507,7 @@ def run_hook(agent):
            "types": sorted({f["type"] for r in verdict.get("results", []) for f in r.get("findings", []) if f["source"] != "degraded"}),
            "sources": [i["source"] for i in items], "ms": round((time.time() - t0) * 1000),
            "basis": verdict.get("basis"), "evidence": verdict.get("evidence")})
-    return emit(cfg, agent, event, decision, block_message(cfg, decision, reasons, where, verdict.get("message", ""), unreachable), reasons)
+    return emit(cfg, agent, event, decision, block_message(cfg, decision, reasons, where, verdict.get("message", ""), unreachable, signed_out), reasons)
 
 
 def main():
@@ -363,8 +529,24 @@ def main():
     if cmd == "check":
         text = " ".join(sys.argv[2:]) or sys.stdin.read()
         print(json.dumps(call_guard(cfg, [{"source": "cli", "text": text}], "cli"), ensure_ascii=False, indent=2))
+    elif cmd == "login":
+        try:
+            login(cfg, browser="--no-browser" not in sys.argv[2:])
+        except Exception as e:
+            sys.exit(f"login failed: {e}")
+    elif cmd == "logout":
+        try:
+            os.remove(TOKEN_FILE)
+        except FileNotFoundError:
+            pass
+        print(m(cfg, "logout_done"))
     elif cmd == "status":
-        if cfg["backend"] == "local":
+        if cfg["backend"] == "api":
+            try:
+                print(json.dumps(call_api(cfg, {"health": True}), indent=2))
+            except NotSignedIn:
+                sys.exit(m(cfg, "login_needed") + "\n" + m(cfg, "login_hint"))
+        elif cfg["backend"] == "local":
             sys.path.insert(0, HOME)
             import guard_core
             print(json.dumps(guard_core.health(cfg["decider_url"]), indent=2))

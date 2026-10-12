@@ -138,15 +138,18 @@ make install                                                           # 이 PC 
 
 마지막에 스모크 테스트를 하고 콘솔 주소를 출력합니다. 관리자에게는 Cognito 가 임시 비밀번호를 메일로 보냅니다.
 
-팀원 PC 에서는:
+팀원 PC 에서는 hook 의 인증 방식을 고릅니다:
 
 ```bash
 git clone … && cd strands-decider-guard
-client/install.sh --outputs outputs.json [--profile 팀원-프로필] [--agents claude,codex,kiro]
+client/install.sh --outputs outputs.json --auth jwt [--agents claude,codex,kiro]   # 브라우저 로그인, AWS 자격 증명 불필요
+client/install.sh --outputs outputs.json [--profile 팀원-프로필]                   # 또는: 팀원의 AWS 자격 증명 (IAM)
 ```
 
-- `outputs.json` 을 팀원에게 공유하세요. 비밀 정보 없이 이름과 ARN 만 들어 있습니다.
-- 팀원의 IAM 에는 출력값의 **`InvokePolicyArn`** 관리형 정책을 붙여야 합니다. guard 에 대한 `lambda:InvokeFunction` 하나만 허용합니다.
+- `outputs.json` 을 팀원에게 공유하세요. 비밀 정보 없이 이름, ARN, URL 만 들어 있습니다.
+- **로그인 (`--auth jwt`, 개발자에게 AWS 접근이 없을 때 권장):** `make add-dev DEV_EMAIL=…` 로 계정을 만들거나 회사 IdP 와 연동합니다.
+  판정 로그에 사용자가 남습니다. 동작 원리: [docs/SIGN_IN.ko.md](docs/SIGN_IN.ko.md).
+- **IAM 방식:** 팀원의 IAM 에는 출력값의 **`InvokePolicyArn`** 관리형 정책을 붙여야 합니다. guard 에 대한 `lambda:InvokeFunction` 하나만 허용합니다.
 - Claude Code 를 Amazon Bedrock 으로 쓰도록 같이 설정하려면 `--claude-bedrock --bedrock-region us-west-2` 를 붙입니다.
 
 ## 에이전트별 검사 범위

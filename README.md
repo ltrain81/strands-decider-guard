@@ -129,15 +129,18 @@ The deploy creates a GPU host (default `g6.xlarge`) running strands-decider, a g
 a versioned S3 bucket for the policy, and the policy console (CloudFront, Cognito login, HTTP API).
 It ends with a smoke test and prints the console URL. Cognito emails the admin a temporary password.
 
-On each teammate's machine:
+On each teammate's machine, pick how the hook authenticates:
 
 ```bash
 git clone … && cd strands-decider-guard
-client/install.sh --outputs outputs.json [--profile their-profile] [--agents claude,codex,kiro]
+client/install.sh --outputs outputs.json --auth jwt [--agents claude,codex,kiro]   # browser sign-in, no AWS credentials
+client/install.sh --outputs outputs.json [--profile their-profile]                 # or: their AWS credentials (IAM)
 ```
 
-- Share `outputs.json` with teammates. It holds no secrets, only names and ARNs.
-- Teammates' IAM identities need the **`InvokePolicyArn`** managed policy from the outputs, which grants
+- Share `outputs.json` with teammates. It holds no secrets, only names, ARNs and URLs.
+- **Sign-in (`--auth jwt`, recommended when developers have no AWS access):** create each sign-in with `make add-dev DEV_EMAIL=…`,
+  or federate with your company IdP. Every decision is logged with the user. How it works: [docs/SIGN_IN.md](docs/SIGN_IN.md).
+- **IAM:** teammates' IAM identities need the **`InvokePolicyArn`** managed policy from the outputs, which grants
   `lambda:InvokeFunction` on the guard and nothing else.
 - To point Claude Code at Amazon Bedrock at the same time, add `--claude-bedrock --bedrock-region us-west-2`.
 

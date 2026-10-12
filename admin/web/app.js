@@ -332,7 +332,7 @@ async function showEvidence(btn) {
 }
 
 function exportCsv() {
-  const cols = ['ts', 'decision', 'client', 'sources', 'categories', 'basis', 'chars', 'ms', 'request_id'];
+  const cols = ['ts', 'decision', 'client', 'user', 'sources', 'categories', 'basis', 'chars', 'ms', 'request_id'];
   const cell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const csv = [cols.join(','), ...state.logs.map(r => cols.map(c => cell(r[c])).join(','))].join('\n');
   const a = document.createElement('a');

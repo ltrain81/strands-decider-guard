@@ -14,9 +14,11 @@ import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as apigw from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import { HttpUserPoolAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { HttpJwtAuthorizer, HttpUserPoolAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 
 const ROOT = path.join(__dirname, '..', '..');
+// Loopback redirect for the hook's browser sign-in (client/decider_guard.py login); must match CALLBACK_PORT there.
+const DEV_CALLBACK = 'http://localhost:8723/callback';
 const DLAMI = '/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id';
 
 export class DeciderGuardStack extends cdk.Stack {
@@ -309,6 +311,52 @@ export class DeciderGuardStack extends cdk.Stack {
     // One authorized catch-all route; handler.py does the routing. OPTIONS is left to the CORS preflight above.
     api.addRoutes({ path: '/api/{proxy+}', methods: [apigw.HttpMethod.GET, apigw.HttpMethod.PUT, apigw.HttpMethod.POST], integration, authorizer });
 
+    // Hook sign-in (install.sh --auth jwt): developers sign in in the browser and the hook sends an ID token to POST
+    // /guard/check, so they need no AWS credentials and every decision is logged with the user. A separate user pool keeps
+    // developer logins out of the admin console; federate it with your corporate IdP (SAML/OIDC) instead of inviting users.
+    // -c devIssuer=https://... -c devAudience=<client id> trusts an external OIDC IdP (Okta, Entra ID, ...) directly.
+    // API Gateway invokes the guard through a resource policy, so this adds no IAM role.
+    const devIssuer = this.node.tryGetContext('devIssuer') as string | undefined;
+    let devAuthorizer: apigw.IHttpRouteAuthorizer;
+    if (devIssuer) {
+      const audience = this.node.tryGetContext('devAudience') as string | undefined;
+      if (!audience) throw new Error('devIssuer needs devAudience (the OIDC client id the hooks sign in with)');
+      devAuthorizer = new HttpJwtAuthorizer('DevAuth', devIssuer, { jwtAudience: [audience] });
+      new cdk.CfnOutput(this, 'DevIssuer', { value: devIssuer });
+      new cdk.CfnOutput(this, 'DevClientId', { value: audience });
+    } else {
+      const devPool = new cognito.UserPool(this, 'Developers', {
+        selfSignUpEnabled: false,
+        signInAliases: { email: true },
+        autoVerify: { email: true },
+        passwordPolicy: { minLength: 12, requireSymbols: false },
+        accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
+        userInvitation: {
+          emailSubject: 'PII guard sign-in / PII 가드 로그인',
+          emailBody: 'Your PII guard sign-in was created. Run: decider-guard login<br>PII 가드 로그인이 만들어졌습니다. 실행: decider-guard login<br>'
+            + 'ID: {username}<br>Temporary password / 임시 비밀번호: {####}',
+        },
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      });
+      const devDomain = devPool.addDomain('DevLogin', { cognitoDomain: { domainPrefix: `decider-guard-dev-${this.account}` } });
+      const devClient = devPool.addClient('Hooks', {
+        generateSecret: false,
+        preventUserExistenceErrors: true,
+        oAuth: { flows: { authorizationCodeGrant: true }, scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL],
+                 callbackUrls: [DEV_CALLBACK], logoutUrls: [DEV_CALLBACK] },
+        idTokenValidity: cdk.Duration.hours(1),
+        accessTokenValidity: cdk.Duration.hours(1),
+        refreshTokenValidity: cdk.Duration.days(Number(this.node.tryGetContext('devSessionDays') ?? 30)),
+      });
+      devAuthorizer = new HttpUserPoolAuthorizer('DevAuth', devPool, { userPoolClients: [devClient] });
+      new cdk.CfnOutput(this, 'DevUserPoolId', { value: devPool.userPoolId });
+      new cdk.CfnOutput(this, 'DevClientId', { value: devClient.userPoolClientId });
+      new cdk.CfnOutput(this, 'DevAuthorizeUrl', { value: `${devDomain.baseUrl()}/oauth2/authorize` });
+      new cdk.CfnOutput(this, 'DevTokenUrl', { value: `${devDomain.baseUrl()}/oauth2/token` });
+    }
+    api.addRoutes({ path: '/guard/check', methods: [apigw.HttpMethod.POST], authorizer: devAuthorizer,
+                    integration: new HttpLambdaIntegration('GuardIntegration', guardFn) });
+    new cdk.CfnOutput(this, 'GuardApiUrl', { value: `${api.apiEndpoint}/guard/check` });
 
     new cdk.CfnOutput(this, 'AdminUrl', { value: consoleUrl });
     new cdk.CfnOutput(this, 'ConsoleBucketName', { value: site.bucketName });

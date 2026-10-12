@@ -18,7 +18,8 @@ the detection policy is edited in the [policy console](ADMIN.md). This page list
 
 | Key | Default | Meaning |
 |---|---|---|
-| `backend` | `lambda` | `lambda`: call the deployed guard. `local`: run the engine in-process against a local decider |
+| `backend` | `lambda` | `lambda`: call the deployed guard with AWS credentials (IAM). `api`: call it through the sign-in API with a token from `decider-guard login` ([developer sign-in](SIGN_IN.md)). `local`: run the engine in-process against a local decider |
+| `api_url`, `auth` | from `outputs.json` | backend `api`: the `GuardApiUrl` endpoint, and `auth.client_id` plus `auth.issuer` (OIDC discovery) or `auth.authorize_url` + `auth.token_url` |
 | `function_name`, `region`, `profile` | from `outputs.json` | Guard Lambda and the AWS profile used to call it (default credential chain if `profile` is empty) |
 | `decider_url` | `http://127.0.0.1:8000` | Local mode only |
 | `fail_mode` | `closed` | `closed`: block when the guard cannot be reached. `open`: allow, with a warning |
@@ -32,6 +33,9 @@ the detection policy is edited in the [policy console](ADMIN.md). This page list
 |---|---|
 | `--outputs outputs.json` | Read the guard name and region from a deployment |
 | `--function-name N --region R` | Same, by hand |
+| `--auth jwt` | With `--outputs`: backend `api`, developers sign in in the browser and need no AWS credentials. Runs `decider-guard login` before the smoke test |
+| `--api-url U --client-id C --issuer I` | Same, by hand (or `--authorize-url` + `--token-url` instead of `--issuer`). This is what you hand to developers without `outputs.json` |
+| `--no-login` | With `--auth jwt`: skip the sign-in and the smoke test |
 | `--local [--decider-url URL]` | Local backend; needs a running decider (`scripts/local-decider.sh start`) |
 | `--agents claude,codex` | Which agents to configure (default `claude,codex`; add `kiro` to opt in — it can block tool calls but not prompts). `--uninstall` removes all three |
 | `--profile P` | AWS profile for calling the guard |
@@ -39,6 +43,8 @@ the detection policy is edited in the [policy console](ADMIN.md). This page list
 | `--fail-open` | Set `fail_mode: open` |
 | `--claude-bedrock [--bedrock-region R]` | Also set `CLAUDE_CODE_USE_BEDROCK=1` / `AWS_REGION` in Claude Code's settings (existing values are kept) |
 | `--uninstall` | Remove the hooks (other hooks are untouched) |
+
+The installer also writes `~/.decider-guard/bin/decider-guard` (`login`, `logout`, `status`, `check TEXT`) and links it into `~/.local/bin` when that exists.
 
 Local mode reads `~/.decider-guard/policy.json` if it exists. The local console (`make local-console`) writes it.
 
@@ -126,6 +132,8 @@ The CDK context lives in `cdk/cdk.json`. Override a value with `-c key=value` in
 | `schedule`, `scheduleUtcOffset` | — , `9` | run the host only in this window, e.g. `MON-FRI 08:00-20:00` (`./deploy.sh --schedule … --utc-offset 9`); kept across redeploys, `--schedule none` removes it |
 | `evidenceDays` | `30` | days before kept original text is deleted (evidence bucket lifecycle rule) |
 | `network` | `nat` | `nat`: GPU host in a private subnet with no public IP, internet through one NAT Gateway (~$43/month in Seoul). `public`: host in a public subnet with a public IP and no NAT (the security group still admits only the guard). `--network`; kept across redeploys; switching replaces the host |
+| `devIssuer`, `devAudience` | — | trust an external OIDC IdP (Okta, Entra ID, …) for developer sign-in instead of the stack's developer user pool; `devAudience` is the client id the hooks use. See [SIGN_IN.md](SIGN_IN.md) |
+| `devSessionDays` | `30` | how long a developer sign-in lasts (Cognito refresh token) before `decider-guard login` is needed again |
 | `spot` | `false` | run the host on Spot, a persistent request that stops on interruption (`--spot` / `--on-demand`; switching replaces the host) |
 
 Guard Lambda environment:
@@ -141,6 +149,7 @@ Outputs in `outputs.json`:
 - `GuardFunctionName`, `GuardFunctionArn`, `InvokePolicyArn`, `Region`
 - `DeciderInstanceId`
 - `AdminUrl`, `AdminUserPoolId`, `PolicyBucketName`, `AlertsTopicArn`, `AlarmPrefix`
+- `GuardApiUrl`, `DevClientId`, and `DevUserPoolId`, `DevAuthorizeUrl`, `DevTokenUrl` (developer pool) or `DevIssuer` (external IdP)
 - `Console*` (used by `ctl.sh publish-console`)
 
 Monitoring and alerts (created by the stack, configured from the console's Alerts tab):
@@ -209,6 +218,7 @@ with your device-management tool:
 | Who | Needs |
 |---|---|
 | Whoever runs `deploy.sh` | CloudFormation, plus permission to create the stack's resources (EC2, VPC, Lambda, IAM roles, S3, CloudFront, Cognito, API Gateway, Logs). The usual CDK bootstrap roles cover this |
+| Each developer (hook, `backend: api`) | no AWS access: a developer sign-in (`make add-dev DEV_EMAIL=…`, or your IdP if federated) |
 | Each developer (hook, `backend: lambda`) | the `InvokePolicyArn` managed policy only: `lambda:InvokeFunction` on the guard |
 | LiteLLM host (`backend: lambda`) | the same `InvokePolicyArn` policy |
 | Console admins | a Cognito user (`make add-admin`); no AWS access needed |
@@ -217,7 +227,7 @@ with your device-management tool:
 
 | Path | What |
 |---|---|
-| `~/.decider-guard/` | hook script, engine copy, `config.json`, local `policy.json`, `audit.log` (decisions only, no text) |
+| `~/.decider-guard/` | hook script, engine copy, `config.json`, local `policy.json`, `audit.log` (decisions only, no text), `token.json` (backend `api`: sign-in tokens, mode 0600; `decider-guard logout` deletes it) |
 | `~/.claude/settings.json` | three hook entries (backed up to `settings.json.bak-decider-guard`) |
 | `~/.kiro/hooks/decider-guard.json` | global Kiro hooks |
 | `~/.codex/hooks.json` | two hook entries (backed up) |

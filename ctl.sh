@@ -7,6 +7,7 @@
 #   ./ctl.sh logs                setup + service logs from the host (via SSM)
 #   ./ctl.sh console             print the policy console URL
 #   ./ctl.sh add-admin EMAIL     create a console login (Cognito emails a temporary password)
+#   ./ctl.sh add-dev EMAIL       create a developer sign-in for --auth jwt hooks (same, in the developer pool)
 #   ./ctl.sh publish-console     re-upload the console files (after editing admin/web)
 set -euo pipefail
 source "$(dirname "$0")/scripts/lib.sh"
@@ -44,10 +45,20 @@ case "${1:-status}" in
         --user-attributes Name=email,Value="$2" Name=email_verified,Value=true >/dev/null
       echo "admin $2 created. A temporary password was emailed (check spam); sign in at $(out AdminUrl)"
     fi ;;
+  add-dev)
+    [ -n "${2:-}" ] || die "usage: ./ctl.sh add-dev EMAIL"
+    POOL="$(out DevUserPoolId)"; [ -n "$POOL" ] || die "no developer user pool (console disabled, or sign-in delegated to devIssuer)"
+    if aws cognito-idp admin-get-user --user-pool-id "$POOL" --username "$2" >/dev/null 2>&1; then
+      echo "developer $2 already exists"
+    else
+      aws cognito-idp admin-create-user --user-pool-id "$POOL" --username "$2" --desired-delivery-mediums EMAIL \
+        --user-attributes Name=email,Value="$2" Name=email_verified,Value=true >/dev/null
+      echo "developer $2 created. A temporary password was emailed (check spam); they sign in with: decider-guard login"
+    fi ;;
   publish-console)
     publish_console ;;
   -h|--help|help)
-    sed -n '2,12p' "$0" ;;
+    sed -n '2,13p' "$0" ;;
   *)
-    sed -n '2,12p' "$0" >&2; exit 2 ;;
+    sed -n '2,13p' "$0" >&2; exit 2 ;;
 esac

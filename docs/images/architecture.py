@@ -60,7 +60,7 @@ cx = shape("Codex CLI", "client", "#232F3D", 160, 165, top=True)
 kr = shape("Kiro CLI<br><i>(opt-in, tool calls)</i>", "client", "#7D8998", 260, 165, top=True)
 hook = box("<b>PII guard hook</b><br>client/decider_guard.py<br><font color='#5A6C86'>prompts · Read/Write/Edit · Bash<br>+ files a command reads · Bash output</font>",
            45, 255, 280, 86, fill="#F4F6F8", stroke="#7D8998")
-box("<b>allow</b> → continue &nbsp; <b>ask</b> → user confirms<br><b>block</b> → masked reasons + who decided", 45, 395, 280, 52,
+box("<b>decider-guard login</b>: browser sign-in, no AWS keys<br><b>allow</b> → continue &nbsp; <b>ask</b> → user confirms<br><b>block</b> → masked reasons + who decided", 45, 385, 280, 68,
     fill="#FFFFFF", stroke="#D5DBDB", extra="fontSize=11;")
 for a_ in (cc, cx, kr):
     edge(a_, hook, "", color=DEV, width=1.5)
@@ -91,12 +91,12 @@ evid = service("<b>Evidence bucket</b><br>opt-in, 30-day expiry", "s3", "#7AA116
 group("Policy console", "group_security_group", "#7D8998", "#5A6C86", 445, 650, 1260, 200, extra="grStroke=0;")
 cf = service("<b>CloudFront</b><br>console (S3 site)", "cloudfront", "#8C4FFF", 500, 720)
 cog = service("<b>Cognito</b><br>admin sign-in", "cognito", "#DD344C", 720, 720)
-api = service("<b>API Gateway</b><br>HTTP API + JWT", "api_gateway", "#E7157B", 940, 720)
+api = service("<b>API Gateway</b><br>HTTP API + JWT<br><font color='#5A6C86'>/api (admins) · /guard/check (hooks)</font>", "api_gateway", "#E7157B", 940, 720)
 adm = service("<b>Admin Lambda</b><br>policy · tests · stats · alerts", "lambda", "#ED7100", 1160, 720)
 eb = service("<b>EventBridge</b><br>health check (5 min)<br>host schedule (optional)", "eventbridge", "#E7157B", 1420, 720)
 
 # ---- flows
-edge(hook, guard, "① lambda:Invoke (IAM)", color=DEV, exit=(1, 0.5), entry=(0, 0.5))
+edge(hook, guard, "① lambda:Invoke (IAM) — or JWT via API Gateway", color=DEV, exit=(1, 0.5), entry=(0, 0.5))
 edge(ll, guard, "", color=DEV, dashed=1, exit=(1, 0.5), entry=(0, 0.75), pts=[(420, 559), (420, 314)])
 edge(guard, ec2, "② one model call (private IP)", color=DEV, exit=(1, 0.5), entry=(0, 0.5))
 edge(guard, gwe, "③ policy, evidence", color=DEV, exit=(0.5, 1), entry=(0.5, 0))
