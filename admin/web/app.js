@@ -123,13 +123,15 @@ async function loadOverview() {
 
 function renderHealth(h) {
   const g = h.guard, host = h.host, al = h.alerts, p = h.policy;
-  const hostKind = { running: 'good', local: 'good', stopped: 'critical', pending: 'warning', stopping: 'warning' }[host.state] || 'muted';
+  const offBySchedule = host.schedule && !host.in_schedule && ['stopped', 'stopping'].includes(host.state);
+  const hostKind = offBySchedule ? 'muted' : { running: 'good', local: 'good', stopped: 'critical', pending: 'warning', stopping: 'warning' }[host.state] || 'muted';
+  const hostDetail = host.schedule ? T('st_schedule', { s: host.schedule, o: (host.utc_offset >= 0 ? '+' : '') + host.utc_offset }) : (host.type || '');
   const alertCell = !al.available ? status('muted', T('st_alerts_na'))
     : al.in_alarm?.length ? status('critical', T('st_alarm', { n: al.in_alarm.length }))
     : al.configured ? status('good', T('st_alerts_ok', { n: al.configured })) : status('muted', T('st_alerts_none'));
   $('#health').innerHTML = [
     [T('health_guard'), g.ok ? status('good', T('st_ok')) : status('critical', T('st_down')), g.ok ? `${g.model} · ${g.device}` : g.error],
-    [T('health_host'), status(hostKind, T('st_' + host.state) || host.state), host.type || ''],
+    [T('health_host'), status(hostKind, offBySchedule ? T('st_sched_off') : T('st_' + host.state)), hostDetail],
     [T('health_policy'), p.updated_at ? status('good', T('st_saved', { t: fmtTime(p.updated_at) })) : status('muted', T('st_default_policy')), p.updated_by || ''],
     [T('health_alerts'), alertCell, al.in_alarm?.length ? al.in_alarm.map(n => T('r_' + n) || n).join(', ') : ''],
   ].map(([k, v, d]) => `<div class="health"><div class="k">${k}</div>${v}<div class="d" title="${esc(d)}">${esc(d)}</div></div>`).join('');

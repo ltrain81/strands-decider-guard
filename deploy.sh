@@ -7,6 +7,11 @@
 #   --instance-type T     GPU host type (default from cdk/cdk.json: g6.xlarge)
 #   --admin-email E       create a policy-console login (Cognito emails a temporary password)
 #   --no-console          skip the policy console (S3 + CloudFront + Cognito + API; adds one IAM role)
+#   --schedule S          run the GPU host only in this window, e.g. "MON-FRI 08:00-20:00" (local time, see --utc-offset);
+#                         outside it the guard checks with regexes only. "none" removes it. Kept across redeploys.
+#   --utc-offset N        time zone of --schedule (default 9 = KST)
+#   --spot / --on-demand  run the GPU host on Spot (~50% cheaper, can be interrupted; regexes keep checking meanwhile)
+#                         or on-demand. Switching replaces the host (the model is downloaded again). Kept across redeploys.
 #   --install-client      also install the hooks on this machine; passes through
 #                         --agents claude,codex[,kiro]  --claude-bedrock  --bedrock-region R  --fail-open  --language en|ko
 #   --preflight-only      run the checks and exit
@@ -14,7 +19,7 @@
 set -euo pipefail
 source "$(dirname "$0")/scripts/lib.sh"
 
-PROFILE="" REGION="" IT="" YES="" INSTALL="" ADMIN_EMAIL="" CONSOLE=true ONLY_CHECK="" CLIENT_ARGS=()
+PROFILE="" REGION="" IT="" YES="" INSTALL="" ADMIN_EMAIL="" CONSOLE=true ONLY_CHECK="" SCHEDULE="" UTC_OFFSET=9 MARKET="" CLIENT_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --profile) PROFILE="$2"; shift ;;
@@ -22,12 +27,16 @@ while [ $# -gt 0 ]; do
     --instance-type) IT="$2"; shift ;;
     --admin-email) ADMIN_EMAIL="$2"; shift ;;
     --no-console) CONSOLE=false ;;
+    --schedule) SCHEDULE="$2"; shift ;;
+    --utc-offset) UTC_OFFSET="$2"; shift ;;
+    --spot) MARKET=spot ;;
+    --on-demand) MARKET=on-demand ;;
     --preflight-only) ONLY_CHECK=1 ;;
     -y|--yes) YES=1 ;;
     --install-client) INSTALL=1 ;;
     --agents|--bedrock-region|--language) CLIENT_ARGS+=("$1" "$2"); shift ;;
     --claude-bedrock|--fail-open) CLIENT_ARGS+=("$1") ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) die "unknown option: $1 (see ./deploy.sh --help)" ;;
   esac
   shift
@@ -104,6 +113,13 @@ cd "$ROOT/cdk"
 [ -d node_modules ] || npm ci --no-audit --no-fund
 aws cloudformation describe-stacks --stack-name CDKToolkit >/dev/null 2>&1 || npx cdk bootstrap "aws://$ACCOUNT/$AWS_REGION"
 CTX=(-c instanceType="$IT" -c console="$CONSOLE")
+# Keep the previous host schedule unless --schedule was given ("none" clears it).
+if [ -z "$SCHEDULE" ]; then
+  PREV="$(out Schedule)"; [ -n "$PREV" ] && [ "$PREV" != "always on" ] && SCHEDULE="${PREV% (UTC*}" && UTC_OFFSET="$(echo "$PREV" | sed -E 's/.*\(UTC\+?(-?[0-9.]+)\)/\1/')"
+fi
+[ -n "$SCHEDULE" ] && [ "$SCHEDULE" != none ] && CTX+=(-c schedule="$SCHEDULE" -c scheduleUtcOffset="$UTC_OFFSET")
+MARKET="${MARKET:-$(out Market)}"
+[ "$MARKET" = spot ] && CTX+=(-c spot=true)
 # Keep a running GPU host: reuse its AMI instead of the newest DLAMI, which would replace the instance.
 IID="$(out DeciderInstanceId)"
 if [ -n "$IID" ]; then

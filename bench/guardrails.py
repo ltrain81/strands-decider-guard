@@ -31,7 +31,7 @@ from rules import RULES  # noqa: E402
 
 SETS = os.path.join(HERE, "data", "sets")
 RES = os.path.join(HERE, "results")
-PII_SETS = ["ai4privacy", "gretel_finance", "nemotron", "kpii_bench", "ko_synth", "dev_public", "dev_synth"]
+PII_SETS = ["ai4privacy", "gretel_finance", "nemotron", "kpii_bench", "ko_synth", "dev_public", "dev_synth", "private_life"]
 PRICE = {"pii": 0.10 / 1000, "topics": 0.15 / 1000}
 
 ENTITIES_IDS = ["AWS_ACCESS_KEY", "AWS_SECRET_KEY", "CREDIT_DEBIT_CARD_NUMBER", "CREDIT_DEBIT_CARD_CVV", "CREDIT_DEBIT_CARD_EXPIRY",
@@ -103,10 +103,14 @@ def load(name):
         return [json.loads(l) for l in f]
 
 
-def run(region, gid, recs, out, workers):
+def run(region, gid, recs, out, workers, merge=False):
     rt = runtime(region)
     with ThreadPoolExecutor(workers) as ex:
         rows = list(ex.map(lambda r: apply(rt, gid, r), recs))
+    if merge and os.path.exists(os.path.join(RES, out)):
+        new_ids = {r["id"] for r in rows}
+        with open(os.path.join(RES, out)) as f:
+            rows = [r for r in map(json.loads, f) if r["id"] not in new_ids] + rows
     with open(os.path.join(RES, out), "w") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -121,9 +125,11 @@ def main():
     ap.add_argument("--region", default="ap-northeast-2")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--keep", action="store_true", help="keep the guardrails after the run")
+    ap.add_argument("--sets", default=None, help="only these PII sets; results are merged into the existing files")
+    ap.add_argument("--configs", default="pii_all,pii_ids,topics")
     args = ap.parse_args()
     os.makedirs(RES, exist_ok=True)
-    pii = [r for s in PII_SETS for r in load(s) if r.get("group") != "weak"]
+    pii = [r for s in (args.sets.split(",") if args.sets else PII_SETS) for r in load(s) if r.get("group") != "weak"]
     rules = load("rules")
     print(f"samples: {len(pii)} PII-set, {len(rules)} rule-set")
 
@@ -136,10 +142,10 @@ def main():
     }
     created = {}
     try:
-        for name, policy in configs.items():
+        for name, policy in ((n, p) for n, p in configs.items() if n in args.configs.split(",")):
             created[name] = create(args.region, f"decider-bench-{name.replace('_', '-')}", **policy)
             print(f"guardrail {name}: {created[name]}")
-            run(args.region, created[name], rules if name == "topics" else pii, f"guardrails_{name}.jsonl", args.workers)
+            run(args.region, created[name], rules if name == "topics" else pii, f"guardrails_{name}.jsonl", args.workers, merge=bool(args.sets))
     finally:
         if not args.keep:
             for gid in created.values():

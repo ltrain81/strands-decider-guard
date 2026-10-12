@@ -1,5 +1,5 @@
 # Benchmark results
-Generated 2026-10-12 08:17 KST by `report.py`. Model `strands-decider-2B-qwen3.5-v1-2610` on `mps` (local strands-decider). Percentages; P = precision, R = recall, FPR = false-positive rate on negatives. "block" = only block counts as positive; "block/ask" = block or ask counts as positive. No sample text appears in this file.
+Generated 2026-10-12 09:51 KST by `report.py`. Model `strands-decider-2B-qwen3.5-v1-2610` on `mps` (local strands-decider). Percentages; P = precision, R = recall, FPR = false-positive rate on negatives. "block" = only block counts as positive; "block/ask" = block or ask counts as positive. No sample text appears in this file.
 ## Sample counts
 | set | positives | weak-only (names/dates) | negatives |
 |---|---|---|---|
@@ -10,98 +10,105 @@ Generated 2026-10-12 08:17 KST by `report.py`. Model `strands-decider-2B-qwen3.5
 | ko_synth | 132 | 0 | 120 |
 | kpii_bench | 200 | 50 | 0 |
 | nemotron | 200 | 50 | 0 |
+| private_life | 111 | 0 | 31 |
 | rules | 120 | 0 | 120 |
 
 ## PII detection per dataset and preset
 Datasets without negatives have no precision/FPR on their own (see pooled table).
 | set | preset | pos | neg | P block | R block | F1 block | FPR block | P block/ask | R block/ask | F1 block/ask | FPR block/ask |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| ai4privacy | lenient | 200 | 100 | 94.7 | 18.0 | 30.3 | 2.0 | 90.2 | 18.5 | 30.7 | 4.0 |
-| ai4privacy | balanced | 200 | 100 | 93.9 | 23.0 | 36.9 | 3.0 | 93.1 | 27.0 | 41.9 | 4.0 |
-| ai4privacy | strict | 200 | 100 | 92.9 | 32.5 | 48.1 | 5.0 | 92.6 | 37.5 | 53.4 | 6.0 |
-| gretel_finance | lenient | 200 | 150 | 98.7 | 38.0 | 54.9 | 0.7 | 98.7 | 38.0 | 54.9 | 0.7 |
-| gretel_finance | balanced | 200 | 150 | 97.9 | 47.5 | 64.0 | 1.3 | 97.0 | 48.0 | 64.2 | 2.0 |
-| gretel_finance | strict | 200 | 150 | 97.3 | 54.0 | 69.5 | 2.0 | 96.5 | 55.0 | 70.1 | 2.7 |
-| nemotron | lenient | 200 | 0 | - | 49.0 | - | - | - | 49.5 | - | - |
-| nemotron | balanced | 200 | 0 | - | 56.5 | - | - | - | 57.0 | - | - |
-| nemotron | strict | 200 | 0 | - | 64.5 | - | - | - | 67.0 | - | - |
-| kpii_bench | lenient | 200 | 0 | - | 65.0 | - | - | - | 65.5 | - | - |
-| kpii_bench | balanced | 200 | 0 | - | 72.0 | - | - | - | 76.0 | - | - |
-| kpii_bench | strict | 200 | 0 | - | 75.0 | - | - | - | 78.5 | - | - |
-| ko_synth | lenient | 132 | 120 | 100.0 | 64.4 | 78.3 | 0.0 | 95.5 | 64.4 | 76.9 | 3.3 |
-| ko_synth | balanced | 132 | 120 | 100.0 | 72.7 | 84.2 | 0.0 | 90.7 | 73.5 | 81.2 | 8.3 |
-| ko_synth | strict | 132 | 120 | 91.1 | 77.3 | 83.6 | 8.3 | 77.3 | 77.3 | 77.3 | 25.0 |
+| ai4privacy | lenient | 200 | 100 | 98.3 | 29.5 | 45.4 | 1.0 | 94.7 | 35.5 | 51.6 | 4.0 |
+| ai4privacy | balanced | 200 | 100 | 97.6 | 41.5 | 58.2 | 2.0 | 94.9 | 47.0 | 62.9 | 5.0 |
+| ai4privacy | strict | 200 | 100 | 93.5 | 43.0 | 58.9 | 6.0 | 92.6 | 44.0 | 59.7 | 7.0 |
+| gretel_finance | lenient | 200 | 150 | 96.5 | 68.5 | 80.1 | 3.3 | 95.8 | 69.0 | 80.2 | 4.0 |
+| gretel_finance | balanced | 200 | 150 | 94.3 | 74.0 | 82.9 | 6.0 | 93.7 | 74.0 | 82.7 | 6.7 |
+| gretel_finance | strict | 200 | 150 | 94.8 | 82.0 | 87.9 | 6.0 | 94.3 | 82.0 | 87.7 | 6.7 |
+| nemotron | lenient | 200 | 0 | - | 66.0 | - | - | - | 67.5 | - | - |
+| nemotron | balanced | 200 | 0 | - | 75.5 | - | - | - | 77.0 | - | - |
+| nemotron | strict | 200 | 0 | - | 77.0 | - | - | - | 78.0 | - | - |
+| kpii_bench | lenient | 200 | 0 | - | 81.0 | - | - | - | 88.0 | - | - |
+| kpii_bench | balanced | 200 | 0 | - | 83.5 | - | - | - | 89.0 | - | - |
+| kpii_bench | strict | 200 | 0 | - | 90.0 | - | - | - | 91.0 | - | - |
+| ko_synth | lenient | 132 | 120 | 100.0 | 84.8 | 91.8 | 0.0 | 91.9 | 85.6 | 88.6 | 8.3 |
+| ko_synth | balanced | 132 | 120 | 100.0 | 89.4 | 94.4 | 0.0 | 92.2 | 90.2 | 91.2 | 8.3 |
+| ko_synth | strict | 132 | 120 | 100.0 | 94.7 | 97.3 | 0.0 | 96.2 | 94.7 | 95.4 | 4.2 |
+| private_life | lenient | 111 | 31 | 100.0 | 75.7 | 86.2 | 0.0 | 100.0 | 75.7 | 86.2 | 0.0 |
+| private_life | balanced | 111 | 31 | 100.0 | 75.7 | 86.2 | 0.0 | 100.0 | 75.7 | 86.2 | 0.0 |
+| private_life | strict | 111 | 31 | 100.0 | 90.1 | 94.8 | 0.0 | 100.0 | 90.1 | 94.8 | 0.0 |
 
 ### Pooled by language (all positives vs all negatives incl. developer negatives)
 | lang | preset | pos | neg | P block | R block | F1 block | FPR block | P block/ask | R block/ask | F1 block/ask | FPR block/ask |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| en | lenient | 600 | 420 | 94.6 | 35.0 | 51.1 | 2.9 | 93.8 | 35.3 | 51.3 | 3.3 |
-| en | balanced | 600 | 420 | 94.8 | 42.3 | 58.5 | 3.3 | 91.3 | 44.0 | 59.4 | 6.0 |
-| en | strict | 600 | 420 | 93.2 | 50.3 | 65.4 | 5.2 | 90.6 | 53.2 | 67.0 | 7.9 |
-| ko | lenient | 332 | 160 | 100.0 | 64.8 | 78.6 | 0.0 | 98.2 | 65.1 | 78.3 | 2.5 |
-| ko | balanced | 332 | 160 | 100.0 | 72.3 | 83.9 | 0.0 | 94.7 | 75.0 | 83.7 | 8.8 |
-| ko | strict | 332 | 160 | 94.7 | 75.9 | 84.3 | 8.8 | 86.3 | 78.0 | 82.0 | 25.6 |
+| en | lenient | 659 | 437 | 98.4 | 56.3 | 71.6 | 1.4 | 95.3 | 58.7 | 72.7 | 4.3 |
+| en | balanced | 659 | 437 | 96.8 | 64.5 | 77.4 | 3.2 | 94.2 | 66.6 | 78.0 | 6.2 |
+| en | strict | 659 | 437 | 95.4 | 69.2 | 80.2 | 5.0 | 94.5 | 69.8 | 80.3 | 6.2 |
+| ko | lenient | 384 | 174 | 100.0 | 82.0 | 90.1 | 0.0 | 95.9 | 85.9 | 90.7 | 8.0 |
+| ko | balanced | 384 | 174 | 100.0 | 84.9 | 91.8 | 0.0 | 96.0 | 88.0 | 91.8 | 8.0 |
+| ko | strict | 384 | 174 | 100.0 | 91.9 | 95.8 | 0.0 | 98.1 | 92.4 | 95.2 | 4.0 |
 
 ### Recall per guard category (all PII datasets, block / block-or-ask)
 | category | n | lenient | balanced | strict |
 |---|---|---|---|---|
 | resident_id | 96 | 100.0 / 100.0 | 100.0 / 100.0 | 100.0 / 100.0 |
-| gov_id | 208 | 44.7 / 45.2 | 51.9 / 54.8 | 60.6 / 64.4 |
-| financial | 253 | 50.2 / 50.2 | 58.9 / 61.7 | 63.6 / 68.0 |
-| contact | 618 | 51.3 / 51.5 | 59.1 / 60.5 | 64.7 / 65.9 |
-| health | 103 | 58.3 / 60.2 | 67.0 / 72.8 | 73.8 / 79.6 |
-| credential | 153 | 43.8 / 43.8 | 53.6 / 53.6 | 62.1 / 63.4 |
+| gov_id | 208 | 70.2 / 76.4 | 76.4 / 81.2 | 78.8 / 79.3 |
+| financial | 253 | 68.0 / 71.1 | 76.3 / 79.1 | 78.3 / 79.4 |
+| contact | 618 | 70.9 / 72.8 | 79.0 / 80.4 | 84.6 / 84.8 |
+| health | 103 | 73.8 / 84.5 | 79.6 / 88.3 | 83.5 / 84.5 |
+| credential | 153 | 62.7 / 62.7 | 65.4 / 65.4 | 64.7 / 66.0 |
 
 ### Korean synthetic set: recall per kind (block / block-or-ask)
 | kind | n | lenient | balanced | strict |
 |---|---|---|---|---|
-| contact | 30 | 66.7 / 66.7 | 83.3 / 83.3 | 86.7 / 86.7 |
-| financial | 24 | 95.8 / 95.8 | 95.8 / 100.0 | 100.0 / 100.0 |
-| gov_id | 12 | 50.0 / 50.0 | 66.7 / 66.7 | 83.3 / 83.3 |
-| health | 18 | 66.7 / 66.7 | 88.9 / 88.9 | 100.0 / 100.0 |
-| hr | 12 | 0.0 / 0.0 | 0.0 / 0.0 | 0.0 / 0.0 |
-| legal | 12 | 0.0 / 0.0 | 0.0 / 0.0 | 0.0 / 0.0 |
+| contact | 30 | 90.0 / 90.0 | 100.0 / 100.0 | 100.0 / 100.0 |
+| financial | 24 | 95.8 / 100.0 | 95.8 / 100.0 | 100.0 / 100.0 |
+| gov_id | 12 | 91.7 / 91.7 | 100.0 / 100.0 | 100.0 / 100.0 |
+| health | 18 | 88.9 / 88.9 | 100.0 / 100.0 | 100.0 / 100.0 |
+| hr | 12 | 0.0 / 0.0 | 0.0 / 0.0 | 41.7 / 41.7 |
+| legal | 12 | 91.7 / 91.7 | 91.7 / 91.7 | 100.0 / 100.0 |
 | resident_id | 24 | 100.0 / 100.0 | 100.0 / 100.0 | 100.0 / 100.0 |
 
 ### Weak-only samples (only names, dates, companies, cities, URLs): share blocked / flagged
 | set | lenient | balanced | strict |
 |---|---|---|---|
-| ai4privacy | 10.0 / 12.0 | 14.0 / 14.0 | 16.0 / 16.0 |
-| gretel_finance | 0.0 / 0.0 | 2.0 / 2.0 | 6.0 / 6.0 |
-| nemotron | 6.0 / 6.0 | 8.0 / 8.0 | 12.0 / 12.0 |
-| kpii_bench | 2.0 / 2.0 | 14.0 / 14.0 | 28.0 / 30.0 |
+| ai4privacy | 14.0 / 20.0 | 18.0 / 24.0 | 24.0 / 24.0 |
+| gretel_finance | 8.0 / 8.0 | 8.0 / 8.0 | 10.0 / 10.0 |
+| nemotron | 26.0 / 26.0 | 26.0 / 26.0 | 34.0 / 34.0 |
+| kpii_bench | 26.0 / 26.0 | 28.0 / 28.0 | 36.0 / 36.0 |
 
 ### Developer-style negatives: false-positive rate (block / block-or-ask)
 | subset | n | lenient | balanced | strict |
 |---|---|---|---|---|
 | dev_public:code | 40 | 0.0 / 0.0 | 0.0 / 0.0 | 0.0 / 0.0 |
 | dev_public:dolly | 40 | 0.0 / 0.0 | 0.0 / 0.0 | 0.0 / 0.0 |
-| dev_public:sql | 30 | 0.0 / 0.0 | 0.0 / 0.0 | 0.0 / 0.0 |
-| dev_synth:en | 60 | 15.0 / 15.0 | 15.0 / 30.0 | 23.3 / 38.3 |
-| dev_synth:ko | 40 | 0.0 / 0.0 | 0.0 / 10.0 | 10.0 / 27.5 |
+| dev_public:sql | 30 | 0.0 / 0.0 | 0.0 / 0.0 | 3.3 / 3.3 |
+| dev_synth:en | 60 | 0.0 / 15.0 | 5.0 / 20.0 | 10.0 / 15.0 |
+| dev_synth:ko | 40 | 0.0 / 10.0 | 0.0 / 10.0 | 0.0 / 5.0 |
 
 ### Who produced the block (share of all blocks)
 regex = strong pattern (resident number, card, keys), model not consulted; regex+model = weak pattern (email/phone/...) confirmed by the model; model = model only.
 | set | preset | blocks | regex | regex+model | model |
 |---|---|---|---|---|---|
-| ai4privacy | lenient | 43 | 14.0 | 39.5 | 46.5 |
-| ai4privacy | balanced | 56 | 10.7 | 42.9 | 46.4 |
-| ai4privacy | strict | 78 | 7.7 | 35.9 | 56.4 |
-| gretel_finance | lenient | 77 | 9.1 | 33.8 | 57.1 |
-| gretel_finance | balanced | 98 | 7.1 | 31.6 | 61.2 |
-| gretel_finance | strict | 114 | 6.1 | 29.8 | 64.0 |
-| nemotron | lenient | 101 | 8.9 | 63.4 | 27.7 |
-| nemotron | balanced | 117 | 7.7 | 64.1 | 28.2 |
-| nemotron | strict | 135 | 6.7 | 62.2 | 31.1 |
-| kpii_bench | lenient | 131 | 55.0 | 36.6 | 8.4 |
-| kpii_bench | balanced | 151 | 47.7 | 36.4 | 15.9 |
-| kpii_bench | strict | 164 | 43.9 | 34.8 | 21.3 |
-| ko_synth | lenient | 85 | 38.8 | 38.8 | 22.4 |
-| ko_synth | balanced | 96 | 34.4 | 40.6 | 25.0 |
-| ko_synth | strict | 112 | 29.5 | 42.0 | 28.6 |
-| all | lenient | 446 | 29.1 | 42.2 | 28.7 |
-| all | balanced | 527 | 24.7 | 42.5 | 32.8 |
-| all | strict | 621 | 20.9 | 41.1 | 38.0 |
+| ai4privacy | lenient | 67 | 9.0 | 44.8 | 46.3 |
+| ai4privacy | balanced | 94 | 6.4 | 53.2 | 40.4 |
+| ai4privacy | strict | 104 | 5.8 | 48.1 | 46.2 |
+| gretel_finance | lenient | 146 | 6.2 | 28.8 | 65.1 |
+| gretel_finance | balanced | 161 | 5.6 | 32.9 | 61.5 |
+| gretel_finance | strict | 178 | 5.1 | 29.8 | 65.2 |
+| nemotron | lenient | 145 | 6.2 | 59.3 | 34.5 |
+| nemotron | balanced | 164 | 5.5 | 63.4 | 31.1 |
+| nemotron | strict | 171 | 5.3 | 62.6 | 32.2 |
+| kpii_bench | lenient | 175 | 41.1 | 37.1 | 21.7 |
+| kpii_bench | balanced | 181 | 39.8 | 36.5 | 23.8 |
+| kpii_bench | strict | 198 | 36.4 | 33.3 | 30.3 |
+| ko_synth | lenient | 112 | 29.5 | 39.3 | 31.2 |
+| ko_synth | balanced | 118 | 28.0 | 40.7 | 31.4 |
+| ko_synth | strict | 125 | 26.4 | 38.4 | 35.2 |
+| private_life | lenient | 84 | 0.0 | 0.0 | 100.0 |
+| private_life | balanced | 84 | 0.0 | 0.0 | 100.0 |
+| private_life | strict | 100 | 0.0 | 0.0 | 100.0 |
+| all | lenient | 729 | 17.7 | 36.6 | 45.7 |
+| all | balanced | 805 | 16.0 | 40.2 | 43.7 |
+| all | strict | 883 | 14.6 | 37.0 | 48.4 |
 
 ## Custom rules only (all PII categories = allow)
 Rule sensitivity = global preset in each column. P/R per rule: a rule "fires" when its own finding is raised; precision counts firings on every other sample (other rules' samples, hard negatives, developer negatives).

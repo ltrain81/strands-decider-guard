@@ -23,7 +23,7 @@ import os
 import alerts
 import guard_core
 import monitoring
-from common import GUARD_FUNCTION, LOCAL_DECIDER_URL, POLICY_BUCKET, POLICY_FILE, POLICY_KEY, aws
+from common import GUARD_FUNCTION, GUARD_INSTANCE_ID, LOCAL_DECIDER_URL, POLICY_BUCKET, POLICY_FILE, POLICY_KEY, aws
 
 MAX_TEST_CHARS = 20000
 MESSAGES = {
@@ -185,8 +185,13 @@ def route(method, path, body, q, user, lang):
 
 
 def handler(event, context=None):
-    if event.get("health_check"):  # EventBridge schedule
+    if event.get("health_check"):  # EventBridge, every 5 minutes
         return alerts.health_check()
+    if event.get("power") in ("start", "stop"):  # EventBridge, host schedule
+        ec2 = aws("ec2")
+        (ec2.start_instances if event["power"] == "start" else ec2.stop_instances)(InstanceIds=[GUARD_INSTANCE_ID])
+        audit(f"host_{event['power']}", "schedule")
+        return {"power": event["power"]}
     method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
     lang = guard_core.lang_of((event.get("headers") or {}).get("x-lang"))
     path = event.get("rawPath", "")

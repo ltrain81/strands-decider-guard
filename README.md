@@ -169,34 +169,48 @@ make destroy                   # delete everything (asks you to type the stack n
 
 | Item | Approximate cost |
 |---|---|
-| GPU host `g6.xlarge` (NVIDIA L4) | ~$0.80/h in us-east-1, ~$0.99/h in ap-northeast-2. Stop it when idle |
-| EBS gp3 100 GB | ~$8–9/month, also billed while the host is stopped |
-| Public IPv4 for the host (no NAT gateway is created) | ~$3.6/month |
+| GPU host `g6.xlarge` (NVIDIA L4), on-demand 24/7 | ~$735/month in ap-northeast-2 (~$600 in us-east-1) |
+| … only weekdays 08–20 (`SCHEDULE="MON-FRI 08:00-20:00"`) | ~$268/month |
+| … on Spot (`DEPLOY_ARGS=--spot`) + weekdays 08–20 | ~$133/month |
+| EBS gp3 100 GB | ~$9/month, also billed while the host is stopped |
 | Lambda, API Gateway, CloudFront, Cognito, S3, CloudWatch | near zero at team scale |
 
-With `make stop` the hooks can't reach the guard. In `fail_mode: closed`, the default, they block until
-`make start`. See [Configuration](docs/CONFIGURATION.md) for `fail_mode: open`.
+- Outside the schedule, during a Spot interruption, or after `make stop`, the guard **falls back to regex-only checks** and keeps working.
+  Strong patterns block, emails and phone numbers get "ask", and the reason says the model was unavailable.
+- Cheaper hardware was measured and rejected for interactive use ([bench/COMPARISON.md](bench/COMPARISON.md#gpu-host-options)):
+  - T4 (`g4dn.xlarge`) is about 3× slower.
+  - Fractional-GPU and CPU-only instances take about 7 s per check.
+- Team-size cost tables, including Bedrock Guardrails, are in the comparison.
+
+`fail_mode` only matters when the hook cannot reach the guard Lambda itself (no network, no AWS credentials): `closed`, the
+default, blocks; `open` allows with a warning. See [Configuration](docs/CONFIGURATION.md).
 
 ## Accuracy and latency
 
-Measured on synthetic samples with the balanced preset:
-`make eval` runs [`tests/eval_accuracy.py`](tests/eval_accuracy.py) on the 30 tuning and 20 holdout samples.
+Measured on ~1,850 samples from public PII datasets (ai4privacy, Gretel finance, NVIDIA Nemotron-PII, k-pii-bench), synthetic Korean
+and HR/legal sets, and developer-style text. The thresholds were tuned on one half; these are the **other half's** numbers
+([bench/TUNING.md](bench/TUNING.md)):
 
-| Sensitivity | Tuning set (30) | Holdout set (20) |
-|---|---|---|
-| Lenient | 2 misses (short health sentences) | 1 miss (driver's license number) |
-| **Balanced** | all correct | 1 over-trigger: `SELECT name, email FROM users …` is "ask" |
-| Strict | 1 over-trigger: a masking example is "ask" | 1 over-trigger: the same SQL is "ask" |
+| Sensitivity | Recall (en / ko) | Precision | False positives | on developer text |
+|---|---|---|---|---|
+| Lenient | 62.6 % (52.6 / 81.5) | 98.8 % | 1.4 % | 0 % |
+| **Balanced** | **70.0 % (62.1 / 84.8)** | 97.4 % | 3.4 % | 3.1 % |
+| Strict | 75.7 % (67.3 / 91.3) | 96.6 % | 4.7 % | 6.2 % |
 
-- The thresholds were tuned on the tuning set. While adding the "specific person" question, the holdout SQL
-  score was also visible, so treat the holdout as not fully independent.
-- Custom rules written in Korean were right on 9 of 10 sentences.
-- **Latency:** about 200–300 ms per check with the model on an Apple-silicon Mac. End to end through
-  hook → Lambda → GPU, Claude Code saw 0.3–0.65 s per hook. Regex-only blocks take under 1 ms.
-- **Benchmark on public datasets** (ai4privacy, Gretel, Nemotron-PII, k-pii-bench, ~2,000 samples) and a side-by-side with Amazon Bedrock Guardrails: [bench/RESULTS.md](bench/RESULTS.md), [bench/COMPARISON.md](bench/COMPARISON.md). Short version: very few false positives and strong company rules, but recall on English public PII sets is 42 % at balanced (Guardrails: 78–93 %, with 3–8× more false positives).
-- These are a few dozen synthetic sentences, not a benchmark. Check your own data on the console's Test tab
-  before relying on it.
-
+- The previous release reached 52.5 % recall at balanced on the same samples. The gain came from:
+  - sharper questions and a new **HR / legal / private life** type, which catches 69–86 % of those cases
+  - regex hits that no longer need the model's agreement
+  - published test card numbers and placeholder secrets no longer being flagged
+- **Against Amazon Bedrock Guardrails**, on the same holdout samples ([bench/COMPARISON.md](bench/COMPARISON.md)):
+  - English PII: Guardrails (identifiers only) has higher recall, 74 % vs 62 %, but 2–3× the false positives (11.8 % vs 4.9 %; 9.4 % vs 3.1 % on developer text).
+  - Korean: the decider is ahead, 85 % vs 72 % recall with 0 % false positives.
+  - Company rules: the decider is far ahead, F1 94 vs 66.
+- **Latency:**
+  - Mac (Apple silicon), model check: about 0.2–0.3 s.
+  - AWS, hook → Lambda → GPU: 0.24 s p50 sequential.
+  - Regex-only blocks: under 1 ms.
+- One GPU host sustains about 3.5 checks/s. More concurrent requests queue up rather than run faster.
+- Check your own data on the console's Test tab before relying on these numbers.
 ## Limitations
 
 - **Client hooks are not enforcement.** A user can remove them. For enforcement:
@@ -217,7 +231,8 @@ Measured on synthetic samples with the balanced preset:
 
 | Symptom | Fix |
 |---|---|
-| Every prompt is blocked with "check failed" | The guard is unreachable: `make health`. A stopped host needs `make start`. For local mode, run `scripts/local-decider.sh status`. To allow while it is down, set `fail_mode: open` in `~/.decider-guard/config.json` |
+| Every prompt is blocked with "Could not reach the guard" | The hook cannot reach the guard Lambda: check network and AWS credentials (`aws sts get-caller-identity`), then `make health`. To allow while it is down, set `fail_mode: open` in `~/.decider-guard/config.json` |
+| Reasons say "model unavailable: checked with patterns only" | The GPU host is stopped (schedule, Spot interruption, `make stop`) or unhealthy: `make status`, `make start`. Local mode: `scripts/local-decider.sh start` |
 | `make deploy`: GPU quota is 0 | Service Quotas → EC2 → *Running On-Demand G and VT instances*: request at least 4 vCPUs. Or use `--instance-type` with a type you have quota for |
 | `Cannot exceed quota for RolesPerAccount` | Your account is at the IAM role limit. The stack adds 2 roles (3 with the console), and CDK bootstrap adds 5 once. Free some roles, request an increase, or use `DEPLOY_ARGS=--no-console` |
 | `CREATE_FAILED … Invalid rule description` or other CloudFormation errors | Re-run `make deploy`. A stack in `ROLLBACK_COMPLETE` is recreated automatically |

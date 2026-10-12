@@ -75,25 +75,34 @@ Each category combines regex patterns and a model category:
 | `financial` | `card_number` (strong, Luhn-checked), `bank_account` | `financial` |
 | `contact` | `email`, `kr_mobile`, `phone_intl` | `contact` |
 | `health` | — | `health` |
+| `private_life` | — | `private_life` (a named person's HR/disciplinary, legal, criminal, immigration, beliefs, union, sexual orientation or family matters) |
 | `credential` | `aws_access_key_id`, `aws_secret_key`, `private_key` (all strong) | `credential` |
 
 - **Strong** patterns decide on their own, up to the category's action.
 - Other patterns only count when the model agrees.
 
-Sensitivity presets (from `PRESETS` in `guard/guard_core.py`):
+Sensitivity presets (from `PRESETS` in `guard/guard_core.py`, chosen by `bench/tune.py`; see [bench/TUNING.md](../bench/TUNING.md)):
 
 | | lenient | balanced | strict | Used as |
 |---|---|---|---|---|
-| `cat` | 0.85 | 0.80 | 0.70 | probability mass on enabled sensitive categories needed to count as sensitive |
-| `named` | 0.65 | 0.50 | 0.35 | sensitive + "names a specific person" ≥ this → block |
-| `pattern` | 0.45 | 0.30 | 0.20 | sensitive + a weak regex hit + real-PII ≥ this → block |
-| `block` | 0.85 | 0.75 | 0.60 | sensitive + real-PII ≥ this → block |
-| `ask` | 0.70 | 0.50 | 0.35 | sensitive + real-PII ≥ this → ask |
+| `cat` | 0.60 | 0.90 | 0.90 | probability mass on enabled sensitive categories needed for the main path |
+| `named` | 0.35 | 0.35 | 0.35 | "names a specific person" threshold (main path and named-person path) |
+| `named_cat` | off | 0.40 | 0.30 | named-person path: named + at least this sensitive mass → block |
+| `weak_ps` | 0.30 | 0.30 | 0.15 | weak-pattern path: an email / phone / passport / … regex hit + at least this sensitive mass → block |
+| `pattern` | 0.20 | 0.20 | 0.20 | main path: sensitive + weak regex hit + real-PII ≥ this → block |
+| `block` | 0.85 | 0.60 | 0.60 | main path: sensitive + real-PII ≥ this → block |
+| `ask` | 0.50 | 0.50 | 0.50 | main path: sensitive + real-PII ≥ this → ask |
+| `cred_real` | 0.30 | 0 | 0 | a credential verdict also needs real-PII ≥ this (lets `${DB_PASSWORD}`-style placeholders pass) |
 | `rule` | 0.70 | 0.50 | 0.35 | custom rule answer ≥ this → the rule's action (per-rule sensitivity) |
+
+When the model server cannot be reached (host stopped by the schedule, Spot interruption, network), the guard **falls back to
+regex-only checks**: strong patterns still block, weak patterns (email, phone, …) get *ask*, and the reason says so. After a
+connection failure the model is skipped for 30 s, so a stopped host costs ~1.5 s once rather than a timeout on every call.
 
 ## AWS deployment
 
-`./deploy.sh` flags: `--region`, `--profile`, `--instance-type`, `--admin-email`, `--no-console`, `--preflight-only`,
+`./deploy.sh` flags: `--region`, `--profile`, `--instance-type`, `--admin-email`, `--no-console`, `--schedule`, `--utc-offset`,
+`--spot` / `--on-demand`, `--preflight-only`,
 `-y`, and `--install-client`. `--install-client` passes `--agents`, `--claude-bedrock`, `--bedrock-region`,
 `--fail-open` and `--language` through to `install.sh`.
 
@@ -107,6 +116,8 @@ The CDK context lives in `cdk/cdk.json`. Override a value with `-c key=value` in
 | `stackName` | `DeciderGuard` | CloudFormation stack name |
 | `console` | `true` | `false` skips the policy console (one fewer IAM role, no CloudFront/Cognito/API) |
 | `amiId` | — | Set automatically on redeploys so a newer GPU AMI does not replace the running host |
+| `schedule`, `scheduleUtcOffset` | — , `9` | run the host only in this window, e.g. `MON-FRI 08:00-20:00` (`./deploy.sh --schedule … --utc-offset 9`); kept across redeploys, `--schedule none` removes it |
+| `spot` | `false` | run the host on Spot, a persistent request that stops on interruption (`--spot` / `--on-demand`; switching replaces the host) |
 
 Guard Lambda environment:
 

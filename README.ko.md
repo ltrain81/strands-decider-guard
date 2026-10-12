@@ -185,33 +185,51 @@ make destroy                   # 전체 삭제 (스택 이름을 입력해 확�
 
 | 항목 | 대략적인 비용 |
 |---|---|
-| GPU 호스트 `g6.xlarge` (NVIDIA L4) | us-east-1 약 $0.80/시간, ap-northeast-2 약 $0.99/시간. 안 쓸 때는 정지 |
-| EBS gp3 100GB | 월 약 $8–9, 호스트를 정지해도 과금 |
-| 호스트의 퍼블릭 IPv4 (NAT 게이트웨이는 만들지 않음) | 월 약 $3.6 |
+| GPU 호스트 `g6.xlarge` (NVIDIA L4), 온디맨드 24시간 | ap-northeast-2 월 약 $735 (us-east-1 약 $600) |
+| … 평일 08–20시만 (`SCHEDULE="MON-FRI 08:00-20:00"`) | 월 약 $268 |
+| … Spot (`DEPLOY_ARGS=--spot`) + 평일 08–20시 | 월 약 $133 |
+| EBS gp3 100GB | 월 약 $9, 호스트를 정지해도 과금 |
 | Lambda, API Gateway, CloudFront, Cognito, S3, CloudWatch | 팀 규모에서는 거의 0 |
 
-`make stop` 상태에서는 hook 이 guard 에 닿지 못합니다. 기본값인 `fail_mode: closed` 에서는 `make start` 전까지
-차단됩니다. `fail_mode: open` 은 [설정 레퍼런스](docs/CONFIGURATION.md)를 보세요.
+- 운영 시간 외, Spot 중단 중, `make stop` 상태에서는 guard 가 **정규식만으로 검사하며 계속 동작**합니다.
+  강한 패턴은 막고, 이메일·전화번호는 "확인"으로 처리하며, 사유에 모델을 쓸 수 없었다고 표시합니다.
+- 더 싼 하드웨어도 측정했지만 대화형 hook 에는 맞지 않았습니다([bench/COMPARISON.md](bench/COMPARISON.md#gpu-host-options)).
+  - T4(`g4dn.xlarge`)는 약 3배 느립니다.
+  - 분할 GPU와 CPU 전용 인스턴스는 검사 1건에 약 7초가 걸립니다.
+- 팀 규모별 비용표(Bedrock Guardrails 포함)는 비교 문서에 있습니다.
+
+`fail_mode` 는 hook 이 guard Lambda 자체에 닿지 못할 때(네트워크, AWS 자격 증명 문제)만 적용됩니다. 기본값 `closed` 는 막고,
+`open` 은 경고와 함께 통과시킵니다. [설정 레퍼런스](docs/CONFIGURATION.md)를 보세요.
 
 ## 정확도와 지연시간
 
-합성 샘플에서 측정했고, `make eval` 로 재현할 수 있습니다 ([`tests/eval_accuracy.py`](tests/eval_accuracy.py)).
+측정 데이터는 약 1,850건입니다.
+- 공개 PII 데이터셋: ai4privacy, Gretel 금융, NVIDIA Nemotron-PII, k-pii-bench
+- 합성 세트: 한국어 PII, 인사·법률·사생활
+- 개발자 텍스트
 
-| 민감도 | 튜닝 세트 (30) | 홀드아웃 세트 (20) |
-|---|---|---|
-| 관대 | 놓침 2 (짧은 건강 정보 문장) | 놓침 1 (운전면허번호) |
-| **보통** | 전부 맞음 | 과잉 1: `SELECT name, email FROM users …` 가 "확인" |
-| 엄격 | 과잉 1: 마스킹 예시가 "확인" | 과잉 1: 같은 SQL 이 "확인" |
+임계값은 절반으로 정했고, 아래는 **나머지 절반**의 결과입니다([bench/TUNING.md](bench/TUNING.md)).
 
-- 임계값은 튜닝 세트로 정했습니다. "특정인" 질문을 추가하면서 홀드아웃 SQL 점수도 봤기 때문에, 홀드아웃이 완전히 독립적이지는 않습니다.
-- 한국어로 쓴 회사 규칙은 10문장 중 9개를 맞혔습니다.
+| 민감도 | 재현율 (영어 / 한국어) | 정밀도 | 오탐률 | 개발 텍스트 오탐 |
+|---|---|---|---|---|
+| 관대 | 62.6% (52.6 / 81.5) | 98.8% | 1.4% | 0% |
+| **보통** | **70.0% (62.1 / 84.8)** | 97.4% | 3.4% | 3.1% |
+| 엄격 | 75.7% (67.3 / 91.3) | 96.6% | 4.7% | 6.2% |
+
+- 이전 버전은 같은 샘플에서 보통 기준 재현율 52.5%였습니다. 좋아진 이유:
+  - 질문을 다듬고 **인사·법률·사생활** 유형을 새로 넣었습니다(해당 사례의 69–86%를 잡음).
+  - 정규식이 맞으면 모델이 동의하지 않아도 잡습니다.
+  - 공개된 테스트 카드번호와 자리표시자 비밀번호는 더 이상 걸리지 않습니다.
+- **Amazon Bedrock Guardrails 와 비교** (같은 검증용 샘플, [bench/COMPARISON.md](bench/COMPARISON.md)):
+  - 영어 PII: Guardrails(식별자만)의 재현율이 74% 대 62%로 높지만, 오탐이 2–3배입니다(11.8% 대 4.9%, 개발 텍스트 9.4% 대 3.1%).
+  - 한국어: decider 가 앞섭니다. 재현율 85% 대 72%, 오탐 0%.
+  - 회사 규칙: decider 가 크게 앞섭니다. F1 94 대 66.
 - **지연시간:**
-  - Apple 실리콘 Mac 에서 모델 검사 1회 약 200–300ms
-  - hook → Lambda → GPU 전체 경로는 Claude Code 실측 기준 hook 1회당 0.3–0.65초
-  - 정규식만으로 막히는 경우 1ms 이하
-- **공개 데이터셋 벤치마크** (ai4privacy, Gretel, Nemotron-PII, k-pii-bench, 약 2,000건)와 Amazon Bedrock Guardrails 비교: [bench/RESULTS.md](bench/RESULTS.md), [bench/COMPARISON.md](bench/COMPARISON.md). 요약하면 오탐이 매우 적고 회사 규칙이 강하지만, 영어 공개 PII 세트의 재현율은 보통 기준 42% 입니다 (Guardrails 78–93%, 대신 오탐이 3–8배).
-- 수십 개의 합성 문장일 뿐 벤치마크가 아닙니다. 쓰기 전에 콘솔 테스트 탭에서 실제 업무 문장으로 확인하세요.
-
+  - Apple 실리콘 Mac: 모델 검사 약 0.2–0.3초
+  - AWS hook → Lambda → GPU: 순차 기준 p50 0.24초
+  - 정규식만으로 막히는 경우: 1ms 이하
+- GPU 호스트 1대는 초당 약 3.5건을 처리합니다. 동시 요청이 늘면 빨라지지 않고 줄을 섭니다.
+- 쓰기 전에 콘솔 테스트 탭에서 실제 업무 문장으로 확인하세요.
 ## 한계
 
 - **클라이언트 hook 은 강제 수단이 아닙니다.** 사용자가 지울 수 있습니다. 강제하려면:
@@ -231,7 +249,8 @@ make destroy                   # 전체 삭제 (스택 이름을 입력해 확�
 
 | 증상 | 해결 |
 |---|---|
-| 모든 프롬프트가 "검사 실패"로 막힘 | guard 에 닿지 못하는 상태입니다. `make health` 로 확인하세요. 호스트가 정지돼 있으면 `make start`, 로컬 모드는 `scripts/local-decider.sh status`. 꺼져 있는 동안 통과시키려면 `~/.decider-guard/config.json` 의 `fail_mode` 를 `open` 으로 |
+| 모든 프롬프트가 "guard 에 연결하지 못해 차단" 으로 막힘 | hook 이 guard Lambda 에 닿지 못하는 상태입니다. 네트워크와 AWS 자격 증명(`aws sts get-caller-identity`)을 확인하고 `make health`. 그동안 통과시키려면 `~/.decider-guard/config.json` 의 `fail_mode` 를 `open` 으로 |
+| 사유에 "모델에 연결할 수 없어 패턴으로만 검사" 가 나옴 | GPU 호스트가 꺼져 있거나(일정, Spot 중단, `make stop`) 이상이 있습니다. `make status`, `make start`. 로컬 모드는 `scripts/local-decider.sh start` |
 | `make deploy`: GPU 쿼터가 0 | Service Quotas → EC2 → *Running On-Demand G and VT instances* 에서 4 vCPU 이상 요청. 또는 쿼터가 있는 `--instance-type` 사용 |
 | `Cannot exceed quota for RolesPerAccount` | 계정이 IAM 역할 한도에 찼습니다. 스택은 역할 2개(콘솔 포함 3개), CDK bootstrap 은 최초 1회 5개를 만듭니다. 안 쓰는 역할 정리, 한도 증가 요청, 또는 `DEPLOY_ARGS=--no-console` |
 | CloudFormation 오류 후 재시도 | `make deploy` 를 다시 실행하세요. `ROLLBACK_COMPLETE` 상태의 스택은 자동으로 다시 만듭니다 |

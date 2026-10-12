@@ -25,7 +25,7 @@ case "${1:-status}" in
     echo "the model reloads in ~1-2 min; check with: ./ctl.sh health" ;;
   stop)
     aws ec2 stop-instances --instance-ids "$ID" --query 'StoppingInstances[0].CurrentState.Name' --output text
-    echo "stopped. Until ./ctl.sh start, hooks with fail_mode=closed block prompts (set fail_mode=open in ~/.decider-guard/config.json to allow)." ;;
+    echo "stopping. Until ./ctl.sh start the guard checks with regexes only (strong patterns block, emails/phones ask)." ;;
   logs)
     CID="$(aws ssm send-command --instance-ids "$ID" --document-name AWS-RunShellScript \
       --parameters 'commands=["tail -n 30 /var/log/decider-setup.log","journalctl -u strands-decider -n 40 --no-pager"]' \

@@ -7,6 +7,7 @@ ADMIN_EMAIL  ?=
 AGENTS       ?= claude,codex
 LANGUAGE     ?=
 DEPLOY_ARGS  ?=
+SCHEDULE     ?=
 INSTALL_ARGS ?=
 
 aws_args     = $(if $(REGION),--region $(REGION)) $(if $(PROFILE),--profile $(PROFILE))
@@ -38,8 +39,8 @@ local-stop: ## stop the local strands-decider server
 preflight: ## check AWS credentials, GPU quota and IAM headroom without deploying
 	@./deploy.sh $(aws_args) --preflight-only
 
-deploy: ## deploy to AWS (REGION=..., ADMIN_EMAIL=... recommended)
-	@./deploy.sh $(aws_args) $(if $(ADMIN_EMAIL),--admin-email $(ADMIN_EMAIL)) $(DEPLOY_ARGS)
+deploy: ## deploy to AWS (REGION=..., ADMIN_EMAIL=..., SCHEDULE="MON-FRI 08:00-20:00" optional)
+	@./deploy.sh $(aws_args) $(if $(ADMIN_EMAIL),--admin-email $(ADMIN_EMAIL)) $(if $(SCHEDULE),--schedule "$(SCHEDULE)") $(DEPLOY_ARGS)
 
 install: ## install the hooks against the AWS deployment (reads outputs.json)
 	@client/install.sh --outputs outputs.json $(if $(PROFILE),--profile $(PROFILE)) $(install_args)

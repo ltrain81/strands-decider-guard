@@ -16,7 +16,7 @@ from rules import RULES  # noqa: E402
 
 PRESETS = ("lenient", "balanced", "strict")
 CATS = ["resident_id", "gov_id", "financial", "contact", "health", "credential"]
-SET_ORDER = ["ai4privacy", "gretel_finance", "nemotron", "kpii_bench", "ko_synth"]
+SET_ORDER = ["ai4privacy", "gretel_finance", "nemotron", "kpii_bench", "ko_synth", "private_life"]
 
 
 def load(name):

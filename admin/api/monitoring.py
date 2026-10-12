@@ -9,7 +9,8 @@ import time
 
 import guard_core
 from common import (ADMIN_LOG_GROUP, ALARM_PREFIX, GUARD_FUNCTION, GUARD_INSTANCE_ID, GUARD_LOG_GROUP, LOCAL,
-                    LOCAL_DECIDER_URL, POLICY_FILE, aws, bin_for, insights, iso_from_insights, local_events, percentile)
+                    LOCAL_DECIDER_URL, POLICY_FILE, SCHEDULE, SCHEDULE_UTC_OFFSET, aws, bin_for, in_schedule, insights,
+                    iso_from_insights, local_events, percentile)
 
 DECISIONS = ("allow", "ask", "block")
 SAFE = re.compile(r"^[\w.\-:/ ,@가-힣]{0,80}$")
@@ -70,7 +71,8 @@ def host_status():
         return {"state": "local"}
     try:
         inst = aws("ec2").describe_instances(InstanceIds=[GUARD_INSTANCE_ID])["Reservations"][0]["Instances"][0]
-        return {"state": inst["State"]["Name"], "type": inst["InstanceType"], "id": GUARD_INSTANCE_ID}
+        return {"state": inst["State"]["Name"], "type": inst["InstanceType"], "id": GUARD_INSTANCE_ID,
+                "schedule": SCHEDULE, "utc_offset": SCHEDULE_UTC_OFFSET, "in_schedule": in_schedule()}
     except Exception as e:
         return {"state": "unknown", "error": str(e)[:200]}
 

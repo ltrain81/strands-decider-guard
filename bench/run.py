@@ -25,7 +25,7 @@ from rules import RULES  # noqa: E402
 SETS = os.path.join(HERE, "data", "sets")
 RES = os.path.join(HERE, "results")
 PRESETS = ("lenient", "balanced", "strict")
-PII_SETS = ["ai4privacy", "gretel_finance", "nemotron", "kpii_bench", "ko_synth", "dev_public", "dev_synth"]
+PII_SETS = ["ai4privacy", "gretel_finance", "nemotron", "kpii_bench", "ko_synth", "dev_public", "dev_synth", "private_life"]
 CATS = [c["id"] for c in g.CATEGORIES]
 
 # ------------------------------------------------------------------ memoised model calls

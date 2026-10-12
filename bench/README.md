@@ -92,14 +92,14 @@ and deletes them afterwards (`--keep` to keep them); the 2026-10-12 run cost abo
 .venv/bin/python -I guardrails.py --region ap-northeast-2 && .venv/bin/python -I compare.py
 ```
 
-Findings (2026-10-12):
-- **PII identifiers:** Guardrails has much higher recall (English 78.5 % identifiers-only / 93 % all types vs 42.3 % for the decider at
-  balanced) but more false positives (pooled FPR 11.4 % / 25.2 % vs 3.3 %; developer-style text 8.1 % / 19.5 % vs 4.3 %).
-  NAME detection is what pushes "all types" to an unusable false-positive rate for coding agents.
-- **Company rules:** the decider's plain-language rules beat Guardrails denied topics clearly (F1 94.4 vs 65.9); denied topics fired on
-  half of the hard negatives (the same-named open-source web server, negotiation tips, published results).
+Findings (2026-10-12, holdout half, after the recall tuning in [TUNING.md](TUNING.md)):
+- **PII identifiers, English:** Guardrails (identifiers only) has higher recall (74 % vs 62 % for the decider at balanced) but 2–3× the false
+  positives (11.8 % vs 4.9 %; developer text 9.4 % vs 3.1 %). "All types" (with NAME) reaches 94 % but flags 20 % of developer text.
+- **Korean:** decider 85 % recall with 0 % false positives vs Guardrails 72 % / 12 %.
+- **HR / legal / private life:** decider 69 % (balanced) / 86 % (strict); Guardrails identifiers-only 4 %. "All types" catches them only
+  through NAME, at the cost above.
+- **Company rules:** decider custom rules F1 94 vs Guardrails denied topics 66 (denied topics fired on half the hard negatives).
 - **Latency:** Guardrails p50 140 ms vs 243 ms for the decider Lambda round trip.
-- **Cost:** Guardrails is cheaper below roughly 370k checks/month (business-hours GPU host) and grows with text length;
-  the decider is a fixed GPU cost per host (~3.5 checks/s each).
-- Practical combination: Guardrails PII (identifiers only) as the server-side backstop for structured identifiers, and the decider for
-  context (a named person's health, HR or legal situation), company rules and low false positives on code.
+- **Cost:** see COMPARISON.md; Guardrails is cheapest for small teams, a scheduled Spot GPU host (~$133/month) wins as volume grows.
+- Practical combination: Guardrails PII (identifiers only) as the server-side backstop, the decider for context, Korean, company rules and
+  low false positives on code.

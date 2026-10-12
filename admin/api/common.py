@@ -22,6 +22,8 @@ GUARD_INSTANCE_ID = env("GUARD_INSTANCE_ID")
 ALERTS_TOPIC = env("ALERTS_TOPIC")
 ALARM_PREFIX = env("ALARM_PREFIX", "DeciderGuard-")
 METRIC_NAMESPACE = env("METRIC_NAMESPACE", "DeciderGuard")
+SCHEDULE = env("SCHEDULE", "")                      # e.g. "MON-FRI 08:00-20:00" (host auto start/stop), empty = always on
+SCHEDULE_UTC_OFFSET = float(env("SCHEDULE_UTC_OFFSET", "9"))
 POLICY_FILE = env("POLICY_FILE")
 LOCAL_DECIDER_URL = env("LOCAL_DECIDER_URL")
 AUDIT_LOG = env("AUDIT_LOG")
@@ -39,6 +41,23 @@ def aws(name):
 
 def now_utc():
     return dt.datetime.now(dt.timezone.utc)
+
+
+DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+
+
+def in_schedule(when=None):
+    """True when the host is meant to be running (always true without a schedule)."""
+    if not SCHEDULE:
+        return True
+    days, hours = SCHEDULE.split()
+    d1, d2 = days.split("-")
+    (h1, m1), (h2, m2) = (map(int, x.split(":")) for x in hours.split("-"))
+    local = (when or now_utc()) + dt.timedelta(hours=SCHEDULE_UTC_OFFSET)
+    if not DAYS.index(d1) <= local.weekday() <= DAYS.index(d2):
+        return False
+    minutes = local.hour * 60 + local.minute
+    return h1 * 60 + m1 <= minutes < h2 * 60 + m2
 
 
 def bin_for(hours):

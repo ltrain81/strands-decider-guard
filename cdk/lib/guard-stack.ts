@@ -87,6 +87,9 @@ export class DeciderGuardStack extends cdk.Stack {
       'systemctl enable --now strands-decider',
     );
 
+    // Spot (about half the on-demand price): a persistent request that stops on interruption. While the host is away the
+    // guard falls back to regex-only checks, so an interruption degrades quality instead of blocking developers.
+    const spot = ['true', true].includes(this.node.tryGetContext('spot'));
     const host = new ec2.Instance(this, 'DeciderHost', {
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
@@ -98,11 +101,18 @@ export class DeciderGuardStack extends cdk.Stack {
       securityGroup: deciderSg,
       role,
       userData,
-      requireImdsv2: true,
+      requireImdsv2: !spot,   // with Spot, IMDSv2 is set on the launch template below
       associatePublicIpAddress: true,
       blockDevices: [{ deviceName: '/dev/sda1', volume: ec2.BlockDeviceVolume.ebs(100, { volumeType: ec2.EbsDeviceVolumeType.GP3, encrypted: true }) }],
     });
     cdk.Tags.of(host).add('Name', `${this.stackName}-decider`);
+    if (spot) {
+      const lt = new ec2.LaunchTemplate(this, 'DeciderSpot', {
+        requireImdsv2: true,
+        spotOptions: { requestType: ec2.SpotRequestType.PERSISTENT, interruptionBehavior: ec2.SpotInstanceInterruption.STOP },
+      });
+      (host.node.defaultChild as ec2.CfnInstance).launchTemplate = { launchTemplateId: lt.launchTemplateId, version: lt.latestVersionNumber };
+    }
 
     const guardLogs = new logs.LogGroup(this, 'GuardFnLogs', { retention: logs.RetentionDays.ONE_MONTH, removalPolicy: cdk.RemovalPolicy.DESTROY });
     const fn = new lambda.Function(this, 'GuardFn', {
@@ -134,6 +144,7 @@ export class DeciderGuardStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'InvokePolicyArn', { value: invokePolicy.managedPolicyArn });
     new cdk.CfnOutput(this, 'DeciderInstanceId', { value: host.instanceId });
     new cdk.CfnOutput(this, 'Region', { value: this.region });
+    new cdk.CfnOutput(this, 'Market', { value: spot ? 'spot' : 'on-demand' });
   }
 
   /**
@@ -205,6 +216,11 @@ export class DeciderGuardStack extends cdk.Stack {
       });
     }
 
+    // Optional host schedule, e.g. -c schedule="MON-FRI 08:00-20:00" -c scheduleUtcOffset=9 (outside it the host is stopped
+    // and the guard checks with regexes only). Implemented as two EventBridge rules -> admin Lambda: no extra IAM role.
+    const schedule = (this.node.tryGetContext('schedule') as string | undefined) || undefined;
+    const utcOffset = Number(this.node.tryGetContext('scheduleUtcOffset') ?? 9);
+
     const adminFn = new lambda.Function(this, 'AdminFn', {
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'handler.handler',
@@ -215,6 +231,7 @@ export class DeciderGuardStack extends cdk.Stack {
         POLICY_BUCKET: policyBucket.bucketName, POLICY_KEY: 'policy.json', GUARD_FUNCTION: guardFn.functionName,
         GUARD_LOG_GROUP: guardLogs.logGroupName, ADMIN_LOG_GROUP: adminLogs.logGroupName, GUARD_INSTANCE_ID: host.instanceId,
         ALERTS_TOPIC: topic.topicArn, ALARM_PREFIX: alarmPrefix, METRIC_NAMESPACE: namespace,
+        SCHEDULE: schedule ?? '', SCHEDULE_UTC_OFFSET: String(utcOffset),
       },
       logGroup: adminLogs,
     });
@@ -230,6 +247,29 @@ export class DeciderGuardStack extends cdk.Stack {
       actions: ['cloudwatch:DescribeAlarms', 'cloudwatch:GetMetricData', 'ec2:DescribeInstances'], resources: ['*'] }));
     adminFn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['cloudwatch:PutMetricData'], resources: ['*'], conditions: { StringEquals: { 'cloudwatch:namespace': namespace } } }));
+    if (schedule) {
+      const m = /^([A-Z]{3})-([A-Z]{3}) (\d{2}):(\d{2})-(\d{2}):(\d{2})$/.exec(schedule);
+      if (!m) throw new Error(`schedule must look like "MON-FRI 08:00-20:00", got "${schedule}"`);
+      const DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+      const days = DAYS.slice(DAYS.indexOf(m[1]), DAYS.indexOf(m[2]) + 1);
+      const cronAt = (h: number, min: number) => {   // local time -> UTC cron, shifting the weekdays when the hour wraps
+        let utc = h - utcOffset, shift = 0;
+        if (utc < 0) { utc += 24; shift = -1; } else if (utc >= 24) { utc -= 24; shift = 1; }
+        const weekDay = days.map(d => DAYS[(DAYS.indexOf(d) + shift + 7) % 7]).join(',');
+        return events.Schedule.cron({ minute: String(min), hour: String(Math.floor(utc)), weekDay });
+      };
+      for (const [name, h, min, power] of [['HostStart', +m[3], +m[4], 'start'], ['HostStop', +m[5], +m[6], 'stop']] as const) {
+        new events.Rule(this, name, {
+          schedule: cronAt(h, min),
+          targets: [new targets.LambdaFunction(adminFn, { event: events.RuleTargetInput.fromObject({ power }) })],
+        });
+      }
+      adminFn.addToRolePolicy(new iam.PolicyStatement({
+        actions: ['ec2:StartInstances', 'ec2:StopInstances'],
+        resources: [`arn:${this.partition}:ec2:${this.region}:${this.account}:instance/${host.instanceId}`] }));
+    }
+    new cdk.CfnOutput(this, 'Schedule', { value: schedule ? `${schedule} (UTC${utcOffset >= 0 ? '+' : ''}${utcOffset})` : 'always on' });
+
     // Health check every 5 minutes -> GuardHealthy metric (watched by the "guard down" alarm).
     new events.Rule(this, 'HealthCheck', {
       schedule: events.Schedule.rate(cdk.Duration.minutes(5)),

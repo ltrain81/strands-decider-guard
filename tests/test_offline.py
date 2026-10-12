@@ -27,7 +27,7 @@ MAIL = lambda user: "@".join([user, "example.com"])         # synthetic addresse
 
 def fake_answers(kind="none", p_kind=0.95, about=0.1, real=0.1, named=0.1, rules=None):
     """Decider answers shaped like the real API: kind probabilities spread over the other categories."""
-    cats = ["none", "contact", "government_id", "financial", "health", "credential"]
+    cats = ["none", "contact", "government_id", "financial", "health", "private_life", "credential"]
     rest = (1 - p_kind) / (len(cats) - 1)
     probs = {c: (p_kind if c == kind else rest) for c in cats}
     out = {"kind": {"type": "choice", "choice": kind, "probabilities": probs, "confidence": p_kind},
@@ -60,9 +60,16 @@ class Patterns(unittest.TestCase):
         self.assertIn("kr_resident_id", self.hits("주민번호 900101-1234567"))
         self.assertNotIn("kr_resident_id", self.hits("order 901301-1234567"))  # month 13
 
-    def test_card_needs_luhn(self):
-        self.assertIn("card_number", self.hits("card 4111 1111 1111 1111"))
-        self.assertNotIn("card_number", self.hits("card 4111 1111 1111 1112"))
+    def test_card_needs_luhn_and_skips_published_test_cards(self):
+        def luhn_complete(prefix):   # append the check digit
+            digits = [int(c) for c in prefix + "0"]
+            for i in range(len(digits) - 2, -1, -2):
+                digits[i] = digits[i] * 2 - 9 if digits[i] > 4 else digits[i] * 2
+            return prefix + str((10 - sum(digits) % 10) % 10)
+        real = luhn_complete("45320151" + "1283036")
+        self.assertIn("card_number", self.hits("card " + real))
+        self.assertNotIn("card_number", self.hits("card " + real[:-1] + str((int(real[-1]) + 1) % 10)))
+        self.assertNotIn("card_number", self.hits("stripe test card " + "4242" * 4))
 
     def test_secrets(self):
         fake_key = "AKIA" + "Z" * 16  # built at runtime so secret scanners do not flag a test fixture
@@ -128,7 +135,7 @@ class Judgement(unittest.TestCase):
         self.assertIn("Health / medical data", r["reasons"][0])
 
     def test_unnamed_sensitive_text_in_the_ask_band_asks(self):
-        r, _ = check("SELECT name, email FROM users", kind="contact", named=0.07, real=0.6)
+        r, _ = check("SELECT name, email FROM users", kind="contact", named=0.07, real=0.55)
         self.assertEqual(r["decision"], "ask")
 
     def test_non_sensitive_text_is_allowed(self):
@@ -141,9 +148,22 @@ class Judgement(unittest.TestCase):
         self.assertEqual(r["decision"], "allow")
 
     def test_sensitivity_changes_the_threshold(self):
-        args = dict(kind="contact", named=0.4, real=0.3)
-        self.assertEqual(check("x" * 20, {"sensitivity": "balanced"}, **args)[0]["decision"], "allow")
-        self.assertEqual(check("x" * 20, {"sensitivity": "strict"}, **args)[0]["decision"], "block")
+        named = dict(kind="contact", named=0.4, real=0.3)       # a named person, little else
+        self.assertEqual(check("x" * 20, {"sensitivity": "lenient"}, **named)[0]["decision"], "allow")
+        self.assertEqual(check("x" * 20, {"sensitivity": "balanced"}, **named)[0]["decision"], "block")
+        values = dict(kind="contact", named=0.2, real=0.7)      # real values, nobody named
+        self.assertEqual(check("x" * 20, {"sensitivity": "balanced"}, **values)[0]["decision"], "ask")
+        self.assertEqual(check("x" * 20, {"sensitivity": "strict"}, **values)[0]["decision"], "block")
+
+    def test_private_life_category(self):
+        r, _ = check("x" * 20, kind="private_life", named=0.8, real=0.3)
+        self.assertEqual((r["decision"], r["findings"][0]["category"]), ("block", "private_life"))
+        r, _ = check("x" * 20, {"categories": {"private_life": "allow"}}, kind="private_life", named=0.8, real=0.3)
+        self.assertEqual(r["decision"], "allow")
+
+    def test_placeholder_credentials_pass_when_lenient(self):
+        r, _ = check("DB_PASSWORD=${DB_PASSWORD}", {"sensitivity": "lenient"}, kind="credential", p_kind=0.95, real=0.1, about=0.1)
+        self.assertEqual(r["decision"], "allow")
 
     def test_custom_rule(self):
         policy = {"custom_rules": [{"id": "phx", "name": "Phoenix", "question": "Unreleased Phoenix plans?", "action": "block"}]}
@@ -234,15 +254,32 @@ class Hook(unittest.TestCase):
         self.assertIn("Resident registration number", json.loads(buf.getvalue())["reason"])
 
 
-    def test_unreachable_guard_says_so(self):
+    def _hook(self, ev, cfg):
         with open(os.path.join(self.tmp.name, "config.json"), "w") as f:
-            json.dump({"backend": "local", "decider_url": "http://127.0.0.1:9", "language": "en"}, f)
-        ev = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git log --oneline -20"}})
+            json.dump(cfg, f)
         buf = io.StringIO()
-        with mock.patch("sys.stdin", io.StringIO(ev)), redirect_stdout(buf):
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(ev))), redirect_stdout(buf), redirect_stderr(io.StringIO()):
             sys.modules["guard_core"] = g
             self.h.run_hook("claude")
-        reason = json.loads(buf.getvalue())["hookSpecificOutput"]["permissionDecisionReason"]
+        return buf.getvalue()
+
+    def test_model_down_falls_back_to_patterns(self):
+        g._down_until = 0
+        cfg = {"backend": "local", "decider_url": "http://127.0.0.1:9", "language": "en"}
+        clean = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git log --oneline -20"}}
+        self.assertEqual(self._hook(clean, cfg), "")                       # allowed, model skipped
+        g._down_until = 0
+        mail = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "send the report to " + MAIL("ops")}}
+        out = json.loads(self._hook(mail, cfg))["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "ask")                  # weak pattern without the model -> ask
+        self.assertIn("patterns only", out["permissionDecisionReason"])
+        g._down_until = 0
+
+    def test_unreachable_guard_says_so(self):
+        ev = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git log --oneline -20"}}
+        with mock.patch.object(self.h, "call_guard", side_effect=RuntimeError("guard Lambda error")):
+            out = self._hook(ev, {"backend": "lambda", "function_name": "x", "language": "en"})
+        reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertIn("Could not reach the guard", reason)
         self.assertNotIn("Sensitive data detected", reason)
 

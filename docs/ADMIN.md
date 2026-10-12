@@ -33,11 +33,11 @@ The first screen: is the guard working, and what is it doing?
 
 ### Sensitivity
 
-| Choice | When | What we saw on synthetic samples |
+| Choice | When | Benchmark (held-out half): recall · false positives · on developer text |
 |---|---|---|
-| Lenient | false alarms that block work are the bigger problem | missed some short health and driver's-license sentences |
-| **Balanced (recommended)** | most teams | missed nothing; SQL such as `SELECT name, email …` gets **ask** |
-| Strict | finance, healthcare: missing something is worse | missed nothing; masking examples (`010-XXXX-XXXX`) and SQL get **ask** |
+| Lenient | false alarms that block work are the bigger problem | 63 % · 1.4 % · 0 % |
+| **Balanced (recommended)** | most teams | 70 % · 3.4 % · 3.1 % |
+| Strict | finance, healthcare: missing something is worse | 76 % · 4.7 % · 6.2 % |
 
 ### Actions by information type
 
@@ -45,6 +45,10 @@ Pick **Block**, **Ask** or **Allow** for each type:
 - **Block:** the agent cannot read, write or send it to the model.
 - **Ask:** Claude Code asks the user "continue?". Kiro, Codex and LiteLLM cannot ask, so they block.
 - **Allow:** the type is not checked.
+
+**HR / legal / private life** covers a specific person's disciplinary or HR matter, legal case, criminal record, immigration status,
+religion, political views, union membership, sexual orientation or family situation. These are sensitive data under most privacy laws, and
+regexes cannot find them.
 
 "Resident registration number" is found by its format. The model's own ID judgement follows "Government ID",
 so change the two together.

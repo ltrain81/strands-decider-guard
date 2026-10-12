@@ -8,7 +8,7 @@ GuardHealthy metric that the "guard down" alarm watches.
 import json
 import re
 
-from common import (ALARM_PREFIX, ALERTS_KEY, ALERTS_TOPIC, GUARD_FUNCTION, LOCAL, METRIC_NAMESPACE, POLICY_BUCKET, aws)
+from common import (ALARM_PREFIX, ALERTS_KEY, ALERTS_TOPIC, GUARD_FUNCTION, LOCAL, METRIC_NAMESPACE, POLICY_BUCKET, aws, in_schedule)
 from monitoring import guard_health
 
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -29,7 +29,8 @@ def _alarm(rule, cfg):
     if rule == "guard_down":
         return {**base, "AlarmDescription": "The guard health check failed (model host down or unreachable).",
                 "Namespace": METRIC_NAMESPACE, "MetricName": "GuardHealthy", "Statistic": "Minimum",
-                "EvaluationPeriods": 2, "Threshold": 1, "ComparisonOperator": "LessThanThreshold", "TreatMissingData": "breaching"}
+                "EvaluationPeriods": 2, "Threshold": 1, "ComparisonOperator": "LessThanThreshold",
+                "TreatMissingData": "notBreaching"}  # no data = outside the host schedule
     if rule == "guard_errors":
         return {**base, "AlarmDescription": "The guard Lambda returned errors.", "Namespace": "AWS/Lambda", "MetricName": "Errors",
                 "Dimensions": lam, "Statistic": "Sum", "EvaluationPeriods": 1, "Threshold": 0,
@@ -131,7 +132,10 @@ def send_test(user):
 
 
 def health_check():
-    """Scheduled every 5 minutes: publish GuardHealthy = 1 / 0."""
+    """Scheduled every 5 minutes: publish GuardHealthy = 1 / 0 (nothing while the schedule has the host off)."""
+    if not in_schedule():
+        print(json.dumps({"health_check": "skipped", "reason": "outside schedule"}))
+        return {"skipped": True}
     h = guard_health()
     aws("cloudwatch").put_metric_data(Namespace=METRIC_NAMESPACE, MetricData=[
         {"MetricName": "GuardHealthy", "Value": 1 if h.get("ok") else 0, "Unit": "Count"}])

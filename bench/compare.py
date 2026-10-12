@@ -8,13 +8,14 @@ Run:  .venv/bin/python -I compare.py
 import json
 import math
 import os
+import sys
 from collections import defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RES = os.path.join(HERE, "results")
 PRICE_PII, PRICE_TOPIC = 0.10 / 1000, 0.15 / 1000          # Seoul list prices per text unit (AWS Pricing API, 2026-10-12)
 GPU_HOURLY, EBS_MONTHLY, IPV4_MONTHLY = 0.9896, 9.12, 3.65    # g6.xlarge on-demand Seoul, 100 GB gp3, one public IPv4
-PII_SETS = ["ai4privacy", "gretel_finance", "nemotron", "kpii_bench", "ko_synth", "dev_public", "dev_synth"]
+PII_SETS = ["ai4privacy", "gretel_finance", "nemotron", "kpii_bench", "ko_synth", "private_life", "dev_public", "dev_synth"]
 
 
 def load(name):
@@ -45,15 +46,21 @@ def table(header, rows):
 
 
 def main():
-    decider = [r for r in load("pii.jsonl") if r["preset"] == "balanced" and r.get("group") != "weak"]
-    systems = {"decider (balanced)": decider, "Guardrails PII, all types": load("guardrails_pii_all.jsonl"),
+    sys.path.insert(0, HERE)
+    from features import split_of
+    rows_all = [r for r in load("pii.jsonl") if r.get("group") != "weak"]
+    decider = [r for r in rows_all if r["preset"] == "balanced"]
+    systems = {"decider (balanced)": decider, "decider (strict)": [r for r in rows_all if r["preset"] == "strict"],
+               "Guardrails PII, all types": load("guardrails_pii_all.jsonl"),
                "Guardrails PII, identifiers only": load("guardrails_pii_ids.jsonl")}
-    ids = {r["id"] for r in systems["Guardrails PII, all types"]}
+    # Holdout half only: the decider's thresholds were tuned on the other half (tune.py), Guardrails was not tuned at all.
+    ids = {r["id"] for r in systems["Guardrails PII, all types"] if split_of(r["id"]) == "holdout"}
     systems = {k: [r for r in v if r["id"] in ids] for k, v in systems.items()}
 
     md = ["# strands-decider guard vs Amazon Bedrock Guardrails",
           "",
-          "Same samples, same labels (see README.md for the datasets; weak-only positives excluded). "
+          "Same samples, same labels (see README.md for the datasets; weak-only positives excluded). PII tables use the **holdout half** "
+          "only: the decider's thresholds were tuned on the other half (see TUNING.md); Guardrails was not tuned. "
           "Block = positive. P = precision, R = recall, FPR = false-positive rate on negatives, all in %. "
           "Guardrails configs: **all types** = every identifier entity type plus NAME and ADDRESS, plus the two Korean regexes; "
           "**identifiers only** = without NAME / ADDRESS. Guardrails ran on the DRAFT version, classic tier, input source.",
@@ -140,27 +147,39 @@ def main():
            f"${2 * units * PRICE_PII + t_units * PRICE_TOPIC:.2f} on Guardrails (two PII configs + topics).", "",
            "Guardrails is billed per text unit (up to 1,000 characters), so long inputs such as file contents cost more. "
            "The decider guard is billed per GPU hour regardless of volume; one g6.xlarge sustained about 4 checks/s in perf.py.", ""]
-    gpu_biz = 8 * 22 * GPU_HOURLY + EBS_MONTHLY + IPV4_MONTHLY
-    gpu_247 = 730 * GPU_HOURLY + EBS_MONTHLY + IPV4_MONTHLY
-    capacity = 3.5                     # sustained checks/s per g6.xlarge host (perf.py measured ~3.9 with 4 workers)
+    # Host options, Seoul prices (Pricing API / Spot price history, 2026-10-12). Throughput from perf.py and probe_instances.py.
+    HOURS_SCHED = 12 * 21.7                       # weekdays 08:00-20:00
+    options = [  # name, $/h, hours/month, checks/s per host, note
+        ("g6.xlarge on-demand, 24/7", 0.9896, 730, 3.5, "current default"),
+        ("g6.xlarge on-demand, weekdays 08-20", 0.9896, HOURS_SCHED, 3.5, "--schedule; regex-only outside the window"),
+        ("g6.xlarge 1-yr reserved (no upfront), 24/7", 0.6442, 730, 3.5, "commitment; billed even when stopped"),
+        ("g6.xlarge Spot, 24/7", 0.47, 730, 3.5, "--spot; interruptions fall back to regex-only"),
+        ("g6.xlarge Spot, weekdays 08-20", 0.47, HOURS_SCHED, 3.5, "--spot --schedule"),
+        ("g4dn.xlarge (T4) on-demand, weekdays 08-20", 0.647, HOURS_SCHED, 1.0, "~3x slower: 0.8-1.0 s per check"),
+    ]
+    def host_cost(rate, hours):
+        return rate * hours + EBS_MONTHLY + IPV4_MONTHLY * hours / 730   # the auto-assigned public IP is released while stopped
+    md += ["### GPU host options", "",
+           "Measured on probe instances: g4dn.xlarge (T4) 0.78 s per short check and ~1 check/s; g6f fractional-GPU types ran on CPU "
+           "with the GPU image (they need NVIDIA GRID drivers) at ~7 s per check, which also rules out CPU-only instances for interactive hooks.", "",
+           table(["option", "$/month (1 host)", "checks/s per host", "note"],
+                 [[n, f"${host_cost(r, h):,.0f}", c, note] for n, r, h, c, note in options]), ""]
     rows = []
     for devs, per_day, chars in ((10, 200, 1500), (50, 300, 2000), (200, 300, 2000), (500, 400, 3000)):
         checks = devs * per_day * 22
         u = checks * math.ceil(chars / 1000)
-        g_pii = u * PRICE_PII
-        g_all = u * (PRICE_PII + PRICE_TOPIC)
-        load_avg = checks / (8 * 22 * 3600)
-        hosts = max(1, math.ceil(load_avg * 3 / capacity))   # peak ~3x the business-hours average
-        rows.append([f"{devs} devs × {per_day} checks/day × 22 days, {chars} chars avg", f"{checks:,}", f"{u:,}",
-                     f"${g_pii:,.0f}", f"${g_all:,.0f}", f"${gpu_biz * hosts:,.0f}", f"${gpu_247 * hosts:,.0f}",
-                     f"{load_avg:.2f} → {hosts} host{'s' if hosts > 1 else ''}"])
-    md += [table(["scenario", "checks/month", "text units", "Guardrails PII only", "Guardrails PII + topics",
-                  "decider, hosts on 8h × 22d", "decider, hosts 24/7", "avg checks/s → GPU hosts (peak 3× avg)"], rows), "",
-           f"Break-even (PII + topics, {2} text units per check): about "
-           f"{gpu_biz / ((PRICE_PII + PRICE_TOPIC) * 2):,.0f} checks/month for a business-hours host, "
-           f"{gpu_247 / ((PRICE_PII + PRICE_TOPIC) * 2):,.0f} for a 24/7 host. "
-           "Lambda, S3, CloudWatch and the console add cents at these volumes. Prices: Seoul on-demand list prices; "
-           "Savings Plans / Spot lower the GPU side, and Guardrails has no idle cost.", ""]
+        load_avg = checks / (HOURS_SCHED * 3600)
+        row = [f"{devs} devs × {per_day}/day, {chars} chars", f"{checks:,}", f"${u * PRICE_PII:,.0f}", f"${u * (PRICE_PII + PRICE_TOPIC):,.0f}"]
+        for n, r, h, c, note in (options[0], options[1], options[4], options[5]):
+            hosts = max(1, math.ceil(load_avg * 3 / c))   # peak ~3x the average
+            row.append(f"${host_cost(r, h) * hosts:,.0f} ({hosts})")
+        rows.append(row)
+    md += ["### Monthly cost by team size (number of GPU hosts in brackets)", "",
+           table(["scenario", "checks/month", "Guardrails PII", "Guardrails PII + topics", "decider 24/7", "decider weekdays 08-20",
+                  "decider Spot weekdays 08-20", "decider g4dn weekdays 08-20"], rows), "",
+           "Guardrails has no idle cost and is cheapest for small teams; the decider's cost is flat per host, so it wins as volume or "
+           "text length grows, and the schedule + Spot options cut it by about 80 % against on-demand 24/7. Lambda, S3, CloudWatch and "
+           "the console add cents at these volumes.", ""]
     with open(os.path.join(HERE, "COMPARISON.md"), "w") as f:
         f.write("\n".join(md))
     print("\n".join(md))
