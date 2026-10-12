@@ -199,6 +199,12 @@ if [ -n "$INSTALL" ]; then
   P=(); [ -n "$PROFILE" ] && P=(--profile "$PROFILE")
   "$ROOT/client/install.sh" --outputs "$OUTPUTS" --auth iam "${P[@]}" "${CLIENT_ARGS[@]}"   # the deployer's own AWS credentials
 else
-  echo "  Install the hooks on each developer machine (their IAM identity needs the InvokePolicyArn output policy):"
-  echo "    client/install.sh --outputs outputs.json${PROFILE:+ --profile $PROFILE}"
+  if [ -n "$(out AdminUrl)" ]; then
+    echo "  Invite developers in the console's Developers tab: $(out AdminUrl)#users"
+    echo "  They install from $(out AdminUrl)install.html (browser sign-in, no AWS credentials)."
+  else
+    echo "  Create developer sign-ins with ./ctl.sh add-dev EMAIL; they install with:"
+    echo "    client/install.sh --outputs outputs.json"
+  fi
+  echo "  This machine: make add-dev DEV_EMAIL=<you> && make install"
 fi
