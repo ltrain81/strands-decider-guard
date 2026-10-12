@@ -60,7 +60,7 @@ cx = shape("Codex CLI", "client", "#232F3D", 160, 165, top=True)
 kr = shape("Kiro CLI<br><i>(opt-in, tool calls)</i>", "client", "#7D8998", 260, 165, top=True)
 hook = box("<b>PII guard hook</b><br>client/decider_guard.py<br><font color='#5A6C86'>prompts · Read/Write/Edit · Bash<br>+ files a command reads · Bash output</font>",
            45, 255, 280, 86, fill="#F4F6F8", stroke="#7D8998")
-box("each machine uses <b>one</b> mode: ① IAM or ①′ sign-in<br><b>allow</b> → continue &nbsp; <b>ask</b> → user confirms<br><b>block</b> → masked reasons + who decided", 45, 385, 280, 68,
+box("with AWS, one mode per machine: ① IAM or ①′ sign-in<br><font color='#5A6C86'>(local mode, not shown: no AWS)</font><br><b>allow</b> → continue &nbsp; <b>ask</b> → user confirms<br><b>block</b> → masked reasons + who decided", 45, 380, 280, 84,
     fill="#FFFFFF", stroke="#D5DBDB", extra="fontSize=11;")
 for a_ in (cc, cx, kr):
     edge(a_, hook, "", color=DEV, width=1.5)
