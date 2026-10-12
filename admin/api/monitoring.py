@@ -241,7 +241,7 @@ def decision_log(params):
                 and (not category or category in e["categories"].split(",")) and (not q or q.lower() in e["sources"].lower())]
         rows.sort(key=lambda e: e["_t"], reverse=True)
         return {"rows": [{k: v for k, v in e.items() if k != "_t"} for e in rows[:limit]], "truncated": len(rows) > limit}
-    parts = ["fields @timestamp, decision, client, user, user_source, sources, categories, chars, ms, basis, evidence, @requestId", "filter ispresent(decision)"]
+    parts = ["fields @timestamp, decision, client, user, user_source, groups, sources, categories, chars, ms, basis, evidence, @requestId", "filter ispresent(decision)"]
     if decisions:
         parts.append("filter decision in [" + ", ".join(f'"{d}"' for d in decisions) + "]")
     if client:
@@ -249,10 +249,10 @@ def decision_log(params):
     if category:
         parts.append(f"filter categories like /{_rx(category)}/")
     if q:
-        parts.append(f"filter sources like /(?i){_rx(q)}/ or user like /(?i){_rx(q)}/")   # target or signed-in user
+        parts.append(f"filter sources like /(?i){_rx(q)}/ or user like /(?i){_rx(q)}/ or groups like /(?i){_rx(q)}/")   # target, user or group
     parts.append(f"sort @timestamp desc | limit {limit + 1}")
     res, partial = insights(GUARD_LOG_GROUP, {"rows": " | ".join(parts)}, hours)
-    rows = [{"ts": iso_from_insights(r.get("@timestamp")), "decision": r.get("decision"), "client": r.get("client"), "user": r.get("user") or None, "user_source": r.get("user_source") or None,
+    rows = [{"ts": iso_from_insights(r.get("@timestamp")), "decision": r.get("decision"), "client": r.get("client"), "user": r.get("user") or None, "user_source": r.get("user_source") or None, "groups": r.get("groups") or None,
              "sources": r.get("sources"), "categories": r.get("categories"), "chars": _int(r.get("chars")),
              "ms": _int(r.get("ms")), "basis": r.get("basis"), "evidence": r.get("evidence"), "request_id": r.get("@requestId")}
             for r in res["rows"]]

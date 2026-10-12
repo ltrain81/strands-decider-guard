@@ -11,6 +11,11 @@
   GET  /api/alerts                  alert settings, email subscription and alarm states (alerts.py)
   PUT  /api/alerts                  {"alerts": {...}} -> save and apply
   POST /api/alerts/test             send a test notification
+  GET  /api/users                   developer sign-ins, groups, install command (users.py)
+  POST /api/users                   {"emails": [...], "groups": [...]} -> email invitations
+  POST /api/users/action            {"username", "action": resend|disable|enable|delete}
+  PUT  /api/users/groups            {"username", "groups": [...]} -> exact group membership
+  POST /api/groups                  {"name", "description"} -> create;  POST /api/groups/delete {"name"}
 
 Also invoked by a 5-minute EventBridge schedule ({"health_check": true}) to publish the guard health metric.
 Modes and settings: see common.py.
@@ -24,6 +29,7 @@ import alerts
 import evidence
 import guard_core
 import monitoring
+import users
 from common import (EVIDENCE_BUCKET, EVIDENCE_DAYS, GUARD_FUNCTION, GUARD_INSTANCE_ID, LOCAL_DECIDER_URL, POLICY_BUCKET, POLICY_FILE,
                     POLICY_KEY, aws)
 
@@ -184,6 +190,33 @@ def route(method, path, body, q, user, lang):
         cfg, changes = alerts.save(body.get("alerts"))
         audit("alerts_saved", user, changes)
         return alerts.status()
+    if path == "/api/users" and method == "GET":
+        return users.status()
+    if path == "/api/users" and method == "POST":
+        results = users.invite(body.get("emails") or [], body.get("groups") or [], lang)
+        ok = [r["email"] for r in results if r["ok"]]
+        if ok:
+            audit("users_invited", user, [{"kind": "user_invited", "value": e} for e in ok]
+                  + [{"kind": "group_added", "value": g} for g in body.get("groups") or []])
+        return {"results": results}
+    if path == "/api/users/action" and method == "POST":
+        users.act(body.get("username", ""), body.get("action", ""), lang)
+        audit("user_" + body["action"], user, [{"kind": "user", "value": body.get("email") or body.get("username")}])
+        return {"ok": True}
+    if path == "/api/users/groups" and method == "PUT":
+        added, removed = users.set_groups(body.get("username", ""), body.get("groups") or [], lang)
+        if added or removed:
+            audit("user_groups", user, [{"kind": "user", "value": body.get("email") or body.get("username")}]
+                  + [{"kind": "group_added", "value": g} for g in added] + [{"kind": "group_removed", "value": g} for g in removed])
+        return {"added": added, "removed": removed}
+    if path == "/api/groups" and method == "POST":
+        users.create_group(body.get("name", ""), body.get("description", ""), lang)
+        audit("group_created", user, [{"kind": "group", "value": body.get("name")}])
+        return {"ok": True}
+    if path == "/api/groups/delete" and method == "POST":
+        users.delete_group(body.get("name", ""))
+        audit("group_deleted", user, [{"kind": "group", "value": body.get("name")}])
+        return {"ok": True}
     if path == "/api/alerts/test" and method == "POST":
         alerts.send_test(user)
         audit("alert_test", user)

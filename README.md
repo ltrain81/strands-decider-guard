@@ -143,19 +143,25 @@ and needs no AWS access.
 
    | | Sign-in (`--auth jwt`, recommended) | IAM |
    |---|---|---|
-   | Developers need | a sign-in: `make add-dev DEV_EMAIL=…` (Cognito emails a temporary password), or your company IdP ([docs/SIGN_IN.md](docs/SIGN_IN.md)) | AWS credentials with the **`InvokePolicyArn`** managed policy (`lambda:InvokeFunction` on the guard only) |
+   | Developers need | an email invitation from the console's **Developers** tab (or `make add-dev DEV_EMAIL=…`), or your company IdP ([docs/SIGN_IN.md](docs/SIGN_IN.md)) | AWS credentials with the **`InvokePolicyArn`** managed policy (`lambda:InvokeFunction` on the guard only) |
    | Who made each request | logged, from the verified token | not logged |
    | Session | 30 days, then `decider-guard login` | as long as their AWS credentials |
 
-3. Give each developer `outputs.json` (no secrets: names, ARNs and URLs) and the [developer steps](#developer-each-machine).
-   For sign-in, create their logins first.
+3. **Sign-in:** invite people in the console's **Developers** tab, optionally into groups. The email links to the install page
+   (`<console URL>/install.html`) with a one-line installer, so developers need neither AWS access nor this repository.
+   **IAM:** give each developer `outputs.json` (no secrets: names, ARNs and URLs) and the [developer steps](#developer-each-machine).
 4. Day to day:
    - `make console` opens the policy console: policy, test, logs (with the user), alerts. See the [console guide](docs/ADMIN.md).
    - `make status`, `make stop` / `make start` (the GPU host is the main cost; see [Operations and cost](#operations-and-cost)).
-   - Revoke a developer: disable their sign-in (`aws cognito-idp admin-disable-user`, or in your IdP).
+   - Developers tab: invite, resend, disable or delete sign-ins and manage groups ([console guide](docs/ADMIN.md#developers-tab)). Every decision is logged with the person and their groups.
 5. Protect your own machine too: `make add-dev DEV_EMAIL=<your email>` then `make install AUTH=jwt` (or `make install` for IAM).
 
 ### Developer (each machine)
+
+**Invited by email?** Open the install page linked in the email (`<console URL>/install.html`) and run its one command:
+`bash -c "$(curl -fsSL <console URL>/dev/install.sh)"`. It downloads the hook, opens the sign-in page and runs the same steps as below.
+
+From a clone of the repository instead:
 
 You need git, python3, Claude Code and/or Codex, the `outputs.json` from your admin, and the email with your temporary password.
 If you cannot clone the repository, your admin can send it as an archive: the installer only uses `client/` and `guard/guard_core.py`.

@@ -53,19 +53,23 @@ the admin pool, so a developer sign-in never opens the policy console.
 1. Deploy with the console enabled (the default): `make deploy REGION=…`. The stack then has the sign-in API and the developer pool.
    It adds no IAM role, because API Gateway calls the guard through a resource policy.
 2. Give developers a sign-in:
-   - `make add-dev DEV_EMAIL=<address>`. Cognito emails a temporary password, and the user sets a new one on first sign-in.
+   - In the console's **Developers** tab, invite by email and pick groups ([console guide](ADMIN.md#developers-tab)), or run `make add-dev DEV_EMAIL=<address>`.
+     Cognito emails a temporary password and a link to the install page; the user sets a new password on first sign-in.
+   - Groups ride in the ID token (`cognito:groups`), so every decision is logged with them.
    - At scale, federate the `Developers` pool with your corporate IdP (Cognito → *Sign-in experience → Federated identity providers*, SAML or OIDC).
      People then sign in with their company account, and leavers lose access when the IdP disables them.
    - Or skip Cognito: `DEPLOY_ARGS="-c devIssuer=https://<your-idp> -c devAudience=<client id>"` trusts your IdP directly.
      Register a public client there with the redirect URI `http://localhost:8723/callback` and scopes `openid email`.
-3. Give developers the install command. `outputs.json` holds no secrets, so you can share it, or the values for the manual form:
+3. Developers install from the install page, `<console URL>/install.html`, which the invitation links to. Its one-liner
+   (`bash -c "$(curl -fsSL <console URL>/dev/install.sh)"`) downloads the hook from the console site, so they need no repository.
+   Or give them the install command. `outputs.json` holds no secrets, so you can share it, or the values for the manual form:
    ```bash
    client/install.sh --outputs outputs.json --auth jwt
    # or
    client/install.sh --api-url <GuardApiUrl> --client-id <DevClientId> \
      --authorize-url <DevAuthorizeUrl> --token-url <DevTokenUrl>       # external IdP: --issuer <DevIssuer>
    ```
-4. Revoke access: disable the user (`aws cognito-idp admin-disable-user`, or in your IdP). Renewal then fails at once.
+4. Revoke access: **Disable** or **Delete** in the Developers tab (or in your IdP). Their sessions end, so renewal fails at once.
    A token already issued keeps working until it expires (at most 1 hour).
 
 The console's Logs tab shows the user in each row's details and CSV export, and the search box matches users as well as targets.

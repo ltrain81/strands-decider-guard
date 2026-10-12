@@ -37,6 +37,17 @@ invoke_guard() {
 }
 
 # Write config.json for the console and upload the static files, then invalidate the CDN cache.
+# Developer install page (install.html) assets under dev/: the hook files, the one-liner and the sign-in settings.
+# Everything here is public on purpose: the API URL and the public client id are not secrets; the tokens are.
+publish_dev_installer() {
+  local dir="$1/dev" api; api="$(out GuardApiUrl)"
+  [ -n "$api" ] || return 0
+  mkdir -p "$dir"
+  tar -czf "$dir/client.tar.gz" -C "$ROOT" client/decider_guard.py client/install.sh client/configure_agents.py guard/guard_core.py
+  python3 "$ROOT/scripts/render_dev_installer.py" "$dir" "$(out AdminUrl)" "$api" "$(out DevClientId)" \
+    "$(out DevIssuer)" "$(out DevAuthorizeUrl)" "$(out DevTokenUrl)"
+}
+
 publish_console() {
   local bucket; bucket="$(out ConsoleBucketName)"
   [ -n "$bucket" ] || { warn "policy console not deployed (console=false)"; return 0; }
@@ -47,6 +58,7 @@ import json, sys
 json.dump({"mode": "cognito", "apiBase": "$(out ConsoleApiUrl)", "cognitoDomain": "$(out ConsoleLoginDomain)",
            "clientId": "$(out ConsoleClientId)", "redirectUri": "$(out AdminUrl)"}, open(sys.argv[1], "w"))
 EOF
+  publish_dev_installer "$tmp"
   aws s3 sync "$tmp" "s3://$bucket/" --delete --cache-control "no-cache" --only-show-errors
   aws cloudfront create-invalidation --distribution-id "$(out ConsoleDistributionId)" --paths '/*' >/dev/null
   rm -rf "$tmp"

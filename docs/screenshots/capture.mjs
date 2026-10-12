@@ -32,6 +32,7 @@ const SHOTS = [
             || [...document.querySelectorAll('#logs tr.clickable')].find(r => r.textContent.includes('📄'));
           row.click(); await new Promise(r => setTimeout(r, 300)); row.nextElementSibling.querySelector('[data-evidence]').click();` },
   { name: 'activity', tab: 'logs', wait: 2500, crop: ['#activity'] },
+  { name: 'users', tab: 'users', wait: 1500, crop: ['#t-users'] },
   { name: 'alerts', tab: 'alerts', wait: 1500, crop: ['#t-alerts'] },
   { name: 'history', tab: 'history', wait: 1500, crop: ['#t-history'],
     act: `document.querySelector('[data-compare]').click();` },

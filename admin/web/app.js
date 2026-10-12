@@ -1,11 +1,11 @@
-// Policy console: overview, policy editor, test, logs, alerts, history.
+// Policy console: overview, policy editor, test, logs, developers, alerts, history.
 // Strings: i18n.js · rule templates and samples: samples.js · charts: charts.js
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clone = o => JSON.parse(JSON.stringify(o));
-const state = { cfg: null, meta: null, saved: null, draft: null, lang: 'en', alerts: null, logs: [], autoTimer: null };
+const state = { cfg: null, meta: null, saved: null, draft: null, lang: 'en', alerts: null, users: null, userFilter: '', logs: [], autoTimer: null };
 
 // ---------- i18n helpers ----------
 const T = (key, vars = {}) => (I18N[state.lang][key] ?? I18N.en[key] ?? key).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
@@ -332,7 +332,7 @@ async function showEvidence(btn) {
 }
 
 function exportCsv() {
-  const cols = ['ts', 'decision', 'client', 'user', 'sources', 'categories', 'basis', 'chars', 'ms', 'request_id'];
+  const cols = ['ts', 'decision', 'client', 'user', 'groups', 'sources', 'categories', 'basis', 'chars', 'ms', 'request_id'];
   const cell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const csv = [cols.join(','), ...state.logs.map(r => cols.map(c => cell(r[c])).join(','))].join('\n');
   const a = document.createElement('a');
@@ -355,6 +355,7 @@ function renderChange(c) {
     case 'patterns': return T('ch_patterns', { from: T('pat_' + c.from), to: T('pat_' + c.to) });
     case 'evidence': return c.from !== undefined ? T('ch_evidence', { from: T('ev_' + c.from), to: T('ev_' + c.to) }) : esc(c.value || '');
     case 'email_added': return T('ch_email_added', { value: esc(c.value) });
+    case 'user_invited': case 'user': case 'group': case 'group_added': case 'group_removed': return T('ch_' + c.kind, { value: esc(c.value) });
     case 'email_removed': return T('ch_email_removed', { value: esc(c.value) });
     case 'rule': return T('ch_alert_rule', { name: T('r_' + c.id), state: (c.enabled ? T('on') : T('off')) +
       (c.threshold ? ` · ${c.threshold}` : '') + (c.threshold_ms ? ` · ${c.threshold_ms} ms` : '') });
@@ -440,6 +441,110 @@ async function saveAlerts() {
   catch (e) { toast(e.message); $('#al-save').disabled = false; }
 }
 
+// ---------- developers tab ----------
+async function loadUsers() {
+  const el = $('#users');
+  el.innerHTML = `<div class="card"><p class="empty">${T('loading')}</p></div>`;
+  try { state.users = await api('/api/users'); renderUsers(); }
+  catch (e) { el.innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; }
+}
+
+const copyBox = c => `<div class="cmd"><code>${esc(c)}</code><button class="btn small" data-copy="${esc(c)}">${T('us_copy')}</button></div>`;
+
+function renderUsers() {
+  const u = state.users, el = $('#users');
+  const page = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}install.html`;
+  const install = `<div class="card"><h2>${T('us_install_title')}</h2><p class="sub">${T('us_install_sub')}</p>
+      ${copyBox(page)}${copyBox(`bash -c "$(curl -fsSL ${page.replace(/install\.html$/, 'dev/install.sh')})"`)}${u.install ? copyBox(u.install) : ''}</div>`;
+  if (!u.available) {
+    el.innerHTML = `<div class="card"><div class="notice">${T('us_na_' + u.reason, { issuer: esc(u.issuer || '') })}</div></div>` + (u.reason === 'idp' ? install : '');
+    return;
+  }
+  const f = (state.userFilter || '').toLowerCase();
+  const rows = u.users.filter(x => !f || x.email.toLowerCase().includes(f) || x.groups.some(g => g.toLowerCase().includes(f)));
+  const stateOf = x => x.state === 'active' ? status('good', T('us_state_active')) : x.state === 'invited' ? status('warning', T('us_state_invited')) : status('muted', T('us_state_disabled'));
+  const groupBoxes = (name, checked) => u.groups.map(g => `<label class="check"><input type="checkbox" name="${name}" value="${esc(g.name)}" ${checked.includes(g.name) ? 'checked' : ''}> ${esc(g.name)}</label>`).join('');
+  el.innerHTML = `
+    <div class="card"><h2>${T('us_invite_title')}</h2><p class="sub">${T('us_invite_sub')}</p>
+      <textarea id="us-emails" rows="3" placeholder="${esc(T('us_emails_ph'))}"></textarea>
+      ${u.groups.length ? `<label class="f">${T('us_invite_groups')}</label><div class="groupedit">${groupBoxes('inv-g', [])}</div>` : ''}
+      <div class="toolbar" style="margin-top:10px"><button class="btn primary" id="us-invite">${T('us_invite')}</button></div>
+      <p class="hint">${T('us_invite_limit')}</p></div>
+    ${install}
+    <div class="card"><h2>${T('us_list_title')}</h2><p class="sub">${T('us_list_sub')}</p>
+      <div class="toolbar"><input type="text" id="us-filter" value="${esc(state.userFilter || '')}" placeholder="${esc(T('us_filter_ph'))}" style="flex:1"></div>
+      ${rows.length ? `<table><thead><tr><th>${T('col_email')}</th><th>${T('col_state')}</th><th>${T('col_groups')}</th><th>${T('col_created')}</th><th></th></tr></thead><tbody>
+        ${rows.map(x => `<tr data-user="${esc(x.username)}" data-email="${esc(x.email)}">
+          <td>${esc(x.email)}</td><td>${stateOf(x)}</td>
+          <td><div class="gchips">${x.groups.map(g => `<span class="gchip">${esc(g)}</span>`).join('')}</div></td>
+          <td>${esc(fmtTime(x.created))}</td>
+          <td><div class="rowbtns">
+            ${u.groups.length ? `<button class="btn ghost small" data-act="groups">${T('us_edit_groups')}</button>` : ''}
+            ${x.state === 'invited' ? `<button class="btn ghost small" data-act="resend">${T('us_resend')}</button>` : ''}
+            ${x.state === 'disabled' ? `<button class="btn ghost small" data-act="enable">${T('us_enable')}</button>` : `<button class="btn ghost small" data-act="disable">${T('us_disable')}</button>`}
+            <button class="btn ghost small" data-act="delete">${T('us_delete')}</button></div></td></tr>
+          <tr class="detail" data-groups-for="${esc(x.username)}" hidden><td colspan="5"><div class="groupedit">${groupBoxes('g-' + x.username, x.groups)}
+            <button class="btn small primary" data-act="save-groups">${T('us_save_groups')}</button></div></td></tr>`).join('')}
+      </tbody></table>` : `<p class="empty">${T('us_none')}</p>`}</div>
+    <div class="card"><h2>${T('us_groups_title')}</h2><p class="sub">${T('us_groups_sub')}</p>
+      ${u.groups.length ? `<table><tbody>${u.groups.map(g => `<tr><td><b>${esc(g.name)}</b></td><td>${esc(g.description)}</td>
+          <td>${T('us_group_members', { n: g.members })}</td>
+          <td><div class="rowbtns"><button class="btn ghost small" data-delgroup="${esc(g.name)}">${T('us_delete')}</button></div></td></tr>`).join('')}</tbody></table>`
+        : `<p class="empty">${T('us_no_groups')}</p>`}
+      <div class="toolbar" style="margin-top:10px"><input type="text" id="us-gname" placeholder="${esc(T('us_group_name_ph'))}">
+        <input type="text" id="us-gdesc" placeholder="${esc(T('us_group_desc_ph'))}" style="flex:1"><button class="btn" id="us-gcreate">${T('us_group_create')}</button></div></div>`;
+}
+
+async function usersAction(fn) {
+  try { await fn(); await loadUsers(); } catch (e) { toast(e.message); }
+}
+
+function bindUsers() {
+  const el = $('#users');
+  el.addEventListener('input', e => {
+    if (e.target.id !== 'us-filter') return;
+    state.userFilter = e.target.value;
+    const pos = e.target.selectionStart; renderUsers();
+    const f = $('#us-filter'); f.focus(); f.setSelectionRange(pos, pos);
+  });
+  el.addEventListener('click', async e => {
+    const copy = e.target.closest('[data-copy]');
+    if (copy) { await navigator.clipboard.writeText(copy.dataset.copy); return toast(T('us_copied')); }
+    if (e.target.id === 'us-invite') {
+      const emails = $('#us-emails').value.split(/[\s,;]+/).filter(Boolean);
+      const groups = $$('input[name="inv-g"]:checked').map(i => i.value);
+      if (!emails.length) return;
+      return usersAction(async () => {
+        const r = await api('/api/users', { method: 'POST', body: JSON.stringify({ emails, groups }) });
+        const failed = r.results.filter(x => !x.ok);
+        toast([T('us_invited', { n: r.results.length - failed.length }), ...failed.map(x => T('us_invite_failed', x))].join(' · '));
+      });
+    }
+    if (e.target.id === 'us-gcreate') {
+      const name = $('#us-gname').value.trim(); if (!name) return;
+      return usersAction(() => api('/api/groups', { method: 'POST', body: JSON.stringify({ name, description: $('#us-gdesc').value.trim() }) }));
+    }
+    const del = e.target.closest('[data-delgroup]');
+    if (del) {
+      if (!confirm(T('us_group_delete_confirm', { name: del.dataset.delgroup }))) return;
+      return usersAction(() => api('/api/groups/delete', { method: 'POST', body: JSON.stringify({ name: del.dataset.delgroup }) }));
+    }
+    const b = e.target.closest('[data-act]'); if (!b) return;
+    const act = b.dataset.act;
+    if (act === 'save-groups') {
+      const username = b.closest('tr').dataset.groupsFor;
+      const row = $(`tr[data-user="${CSS.escape(username)}"]`);
+      const groups = $$(`input[name="${CSS.escape('g-' + username)}"]:checked`).map(i => i.value);
+      return usersAction(() => api('/api/users/groups', { method: 'PUT', body: JSON.stringify({ username, email: row.dataset.email, groups }) }));
+    }
+    const row = b.closest('tr'), username = row.dataset.user, email = row.dataset.email;
+    if (act === 'groups') { const d = $(`tr[data-groups-for="${CSS.escape(username)}"]`); d.hidden = !d.hidden; return; }
+    if (act === 'delete' && !confirm(T('us_confirm_delete', { email }))) return;
+    if (act === 'disable' && !confirm(T('us_confirm_disable', { email }))) return;
+    usersAction(async () => { await api('/api/users/action', { method: 'POST', body: JSON.stringify({ username, email, action: act }) }); toast(T('us_done')); });
+  });
+}
+
 // ---------- history tab ----------
 async function loadHistory() {
   const el = $('#versions');
@@ -476,7 +581,7 @@ async function loadVersion(id, when) {
 
 // ---------- shell ----------
 const currentTab = () => $('#tabs button.on')?.dataset.t || 'overview';
-const LOADERS = { overview: loadOverview, logs: loadLogs, alerts: loadAlerts, history: loadHistory };
+const LOADERS = { overview: loadOverview, logs: loadLogs, users: loadUsers, alerts: loadAlerts, history: loadHistory };
 
 function showTab(t) {
   $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
@@ -504,7 +609,7 @@ async function main() {
   await ensureLogin();
   const r = await api('/api/policy');
   state.meta = r.meta; state.saved = r.policy; state.draft = clone(r.policy);
-  bindPolicy(); renderPolicy(); bindTooltips(); fillLogFilters();
+  bindPolicy(); renderPolicy(); bindTooltips(); fillLogFilters(); bindUsers();
   $('#lang').addEventListener('click', e => { const b = e.target.closest('[data-lang]'); if (b) setLang(b.dataset.lang); });
   $('#tabs').addEventListener('click', e => { const b = e.target.closest('button[data-t]'); if (b) showTab(b.dataset.t); });
   $('#samples').addEventListener('click', e => { const b = e.target.closest('[data-s]'); if (b) $('#test-text').value = SAMPLES[state.lang][b.dataset.s].text; });

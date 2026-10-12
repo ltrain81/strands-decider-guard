@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PII Guard: developer install</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  main { max-width: 860px }
+  ol.steps { padding-left: 22px } ol.steps > li { margin: 0 0 18px } ol.steps h3 { margin: 0 0 6px; font-size: 16px }
+  pre { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; font-size: 13px; white-space: pre-wrap; word-break: break-all; margin: 6px 0 }
+  td code, li code { background: var(--surface-2); border-radius: 4px; padding: 0 4px }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title"></h1>
+  <span class="user"><span class="lang" id="lang"><button data-lang="en">EN</button><button data-lang="ko">한국어</button></span></span>
+</header>
+<main id="page"></main>
+<div class="toast" id="toast"></div>
+<script>
+// Developer install guide. Public page (no sign-in); values come from dev/config.json, written by `ctl.sh publish-console`.
+const TEXT = {
+  en: {
+    title: 'PII guard: install for developers',
+    intro: 'The PII guard checks what your coding agent (Claude Code, Codex) reads, writes and sends to the model, and stops personal data and secrets before they leave your machine. It takes about two minutes. You do not need AWS access.',
+    na: 'This deployment has no developer sign-in, so there is nothing to install from here. Ask your admin.',
+    need_h: 'Before you start',
+    need: ['macOS or Linux with <code>python3</code> 3.9+ and <code>curl</code>', 'Claude Code and/or Codex CLI', 'The invitation email from AWS (“Temporary password”). No email? Ask your admin to invite you.'],
+    s1_h: 'Run the installer', s1: 'In a terminal:', s1_opts: 'Options go after <code>--</code>, for example <code>-- --agents claude,codex,kiro --language ko</code>.',
+    s2_h: 'Sign in', s2: 'A browser opens. Sign in with your email and the temporary password, then choose your own password. The terminal then shows <code>Signed in as …</code> and a smoke test: <code>PII prompt -> blocked (ok)</code>.',
+    s3_h: 'Restart your agents', s3: 'Restart running Claude Code and Codex sessions. In Codex, approve the new hooks once with <code>/hooks</code>.',
+    s4_h: 'Check', s4: 'Any time:',
+    daily_h: 'Day to day',
+    daily: ['If a prompt is blocked, the message says which kind of data was found. Mask it or leave it out.', 'Your sign-in lasts 30 days. After that the guard asks you to run <code>decider-guard login</code>.', 'Over SSH (no browser on that machine): <code>decider-guard login --no-browser</code>, open the printed link on your laptop and paste back the address you land on.', 'Remove the guard:'],
+    safer_h: 'Prefer to read the script first?', safer: 'Download, inspect, then run it:',
+    manual_h: 'From a clone of the repository', manual: 'Same result, if you have the repository:',
+    trouble_h: 'Troubleshooting',
+    trouble: [['“Not signed in to the PII guard”', 'Run <code>decider-guard login</code>. If it keeps happening, your sign-in may have been disabled: ask your admin.'],
+              ['<code>CERTIFICATE_VERIFY_FAILED</code>', 'Your Python has no CA certificates. Re-run the installer, set <code>SSL_CERT_FILE</code>, or on Homebrew run <code>brew postinstall ca-certificates</code>.'],
+              ['<code>Address already in use</code> during sign-in', 'Port 8723 is in use, usually by another sign-in. Close it and retry.'],
+              ['<code>decider-guard: command not found</code>', 'Use <code>~/.decider-guard/bin/decider-guard</code>, or add <code>~/.local/bin</code> to your PATH.'],
+              ['The browser said “Sign-in received” but the terminal shows an error', 'Sign in again with <code>decider-guard login</code>; the first code is single-use.']],
+    copy: 'Copy', copied: 'Copied',
+  },
+  ko: {
+    title: 'PII guard: 개발자 설치',
+    intro: 'PII guard 는 코딩 에이전트(Claude Code, Codex)가 읽고, 쓰고, 모델로 보내는 내용을 검사해서 개인정보와 비밀 값이 PC 밖으로 나가기 전에 막습니다. 설치는 2분 정도 걸리고, AWS 접근은 필요 없습니다.',
+    na: '이 배포에는 개발자 로그인이 없어서 여기서 설치할 것이 없습니다. 관리자에게 문의하세요.',
+    need_h: '시작하기 전에',
+    need: ['<code>python3</code> 3.9 이상과 <code>curl</code> 이 있는 macOS 또는 Linux', 'Claude Code 또는 Codex CLI', 'AWS 가 보낸 초대 메일 ("임시 비밀번호"). 메일이 없으면 관리자에게 초대를 요청하세요.'],
+    s1_h: '설치 스크립트 실행', s1: '터미널에서:', s1_opts: '옵션은 <code>--</code> 뒤에 붙입니다. 예: <code>-- --agents claude,codex,kiro --language ko</code>.',
+    s2_h: '로그인', s2: '브라우저가 열리면 이메일과 임시 비밀번호로 로그인하고 새 비밀번호를 정합니다. 그러면 터미널에 <code>… 로 로그인했습니다</code> 와 스모크 테스트 결과 <code>PII prompt -> blocked (ok)</code> 가 나옵니다.',
+    s3_h: '에이전트 재시작', s3: '실행 중인 Claude Code, Codex 세션을 재시작하세요. Codex 는 <code>/hooks</code> 로 새 hook 을 한 번 승인해야 합니다.',
+    s4_h: '확인', s4: '언제든:',
+    daily_h: '평소 사용',
+    daily: ['프롬프트가 막히면 메시지에 어떤 종류의 정보가 발견됐는지 나옵니다. 마스킹하거나 빼고 다시 보내세요.', '로그인은 30일 동안 유지됩니다. 그 뒤에는 <code>decider-guard login</code> 을 실행하라는 안내가 나옵니다.', 'SSH 환경(브라우저 없음): <code>decider-guard login --no-browser</code> 를 실행하고, 출력된 링크를 노트북에서 연 뒤 도착한 주소를 붙여 넣으세요.', '제거:'],
+    safer_h: '스크립트를 먼저 읽어 보고 싶다면', safer: '내려받아 확인한 뒤 실행하세요:',
+    manual_h: '저장소를 clone 한 경우', manual: '저장소가 있다면 이렇게 해도 같습니다:',
+    trouble_h: '문제 해결',
+    trouble: [['"PII guard 에 로그인하지 않았거나 세션이 만료되었습니다"', '<code>decider-guard login</code> 을 실행하세요. 계속 반복되면 계정이 비활성화되었을 수 있으니 관리자에게 문의하세요.'],
+              ['<code>CERTIFICATE_VERIFY_FAILED</code>', 'Python 에 CA 인증서가 없습니다. 설치 스크립트를 다시 실행하거나, <code>SSL_CERT_FILE</code> 을 지정하거나, Homebrew 라면 <code>brew postinstall ca-certificates</code>.'],
+              ['로그인 중 <code>Address already in use</code>', '8723 포트를 다른 로그인 창이 쓰고 있습니다. 닫고 다시 시도하세요.'],
+              ['<code>decider-guard: command not found</code>', '<code>~/.decider-guard/bin/decider-guard</code> 로 실행하거나 PATH 에 <code>~/.local/bin</code> 을 추가하세요.'],
+              ['브라우저는 "로그인 정보를 받았습니다" 인데 터미널은 오류', '<code>decider-guard login</code> 으로 다시 로그인하세요. 처음 받은 code 는 한 번만 쓸 수 있습니다.']],
+    copy: '복사', copied: '복사했습니다',
+  },
+};
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let lang = [new URLSearchParams(location.search).get('lang'), localStorage.getItem('lang'), (navigator.language || '').slice(0, 2)].find(l => l in TEXT) || 'en';
+let cfg = null;
+const cmd = c => `<div class="cmd"><pre>${esc(c)}</pre><button class="btn small" data-copy="${esc(c)}">${TEXT[lang].copy}</button></div>`;
+
+function render() {
+  const t = TEXT[lang];
+  document.documentElement.lang = lang; document.title = t.title;
+  document.getElementById('title').textContent = t.title;
+  document.querySelectorAll('#lang button').forEach(b => b.classList.toggle('on', b.dataset.lang === lang));
+  const page = document.getElementById('page');
+  if (!cfg) { page.innerHTML = `<div class="card"><p>${t.intro}</p><div class="notice">${t.na}</div></div>`; return; }
+  const one = cfg.oneliner;
+  page.innerHTML = `
+    <div class="card"><p>${t.intro}</p><h2>${t.need_h}</h2><ul>${t.need.map(x => `<li>${x}</li>`).join('')}</ul></div>
+    <div class="card"><ol class="steps">
+      <li><h3>${t.s1_h}</h3>${t.s1}${cmd(one)}<p class="hint">${t.s1_opts}</p></li>
+      <li><h3>${t.s2_h}</h3>${t.s2}</li>
+      <li><h3>${t.s3_h}</h3>${t.s3}</li>
+      <li><h3>${t.s4_h}</h3>${t.s4}${cmd('decider-guard status')}</li>
+    </ol></div>
+    <div class="card"><h2>${t.daily_h}</h2><ul>${t.daily.map(x => `<li>${x}</li>`).join('')}</ul>${cmd(one + ' -- --uninstall')}</div>
+    <div class="card"><h2>${t.safer_h}</h2><p>${t.safer}</p>${cmd(`curl -fsSL ${cfg.base}/dev/install.sh -o decider-guard-install.sh\nless decider-guard-install.sh\nbash decider-guard-install.sh`)}
+      <h2>${t.manual_h}</h2><p>${t.manual}</p>${cmd(cfg.manual)}</div>
+    <div class="card"><h2>${t.trouble_h}</h2><table><tbody>${t.trouble.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+document.addEventListener('click', async e => {
+  const l = e.target.closest('[data-lang]');
+  if (l) { lang = l.dataset.lang; localStorage.setItem('lang', lang); render(); return; }
+  const c = e.target.closest('[data-copy]');
+  if (c) {
+    await navigator.clipboard.writeText(c.dataset.copy);
+    const toast = document.getElementById('toast'); toast.textContent = TEXT[lang].copied; toast.style.display = 'block';
+    setTimeout(() => toast.style.display = 'none', 1500);
+  }
+});
+fetch('dev/config.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null).then(c => { cfg = c; render(); });
+</script>
+</body>
+</html>

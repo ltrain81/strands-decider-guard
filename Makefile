@@ -77,6 +77,7 @@ demo: ## run the scripted demo (DEMO_LANG=en|ko)
 test: ## offline tests (no model, no AWS) + script syntax
 	@python3 -I tests/test_offline.py
 	@python3 -I tests/test_signin.py
+	@python3 -I tests/test_users.py
 	@for f in *.sh scripts/*.sh client/*.sh demo/*.sh; do bash -n "$$f" || exit 1; done; echo "shell syntax ok"
 
 test-model: ## policy feature tests against a running decider (make local first)

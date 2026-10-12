@@ -139,6 +139,26 @@ When "You have unsaved changes" appears at the bottom, click **Save and apply**.
   For example "Sensitivity: Balanced → Strict" or "Rule added: Project Atlas".
 - On AWS this reads CloudWatch Logs, which can take a few seconds for long periods.
 
+## Developers tab
+
+![Developers tab: invitations, install command, sign-ins and groups](images/console-users-en.png)
+
+AWS only, for hooks installed with sign-in (`--auth jwt`). See [developer sign-in](SIGN_IN.md) for how it works.
+
+- **Invite:** paste email addresses (commas or new lines), optionally pick groups, and click **Send invitations**.
+  - AWS emails each person a temporary password and a link to the install page.
+  - The default AWS sender allows 50 invitations a day. For more, connect Amazon SES to the user pool or federate your company IdP.
+- **Install command:** copy the install page link (or the one-line installer) and send it with the invitation.
+  Developers need no AWS access and no copy of this repository.
+- **Sign-ins:** each person's state is *Invited, not signed in yet*, *Active* or *Disabled*.
+  - **Resend invitation** works until the person first signs in.
+  - **Disable** and **Delete** end the person's sessions at once. A token they already hold keeps working for up to an hour.
+  - **Groups…** changes which groups the person is in.
+- **Groups:** create and delete groups (names without spaces). The groups ride in the sign-in token, so every decision in
+  the Logs tab shows them, and the search box finds them. A person picks up a group change at their next token renewal (within an hour).
+- Every invitation, state change and group change is recorded in Admin activity.
+- With an external IdP (`-c devIssuer=…`) this tab only shows the install command; manage people and groups in the IdP.
+
 ## Alerts tab
 
 ![Alerts tab](images/console-alerts-en.png)

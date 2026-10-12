@@ -82,6 +82,19 @@ api.alerts.status = lambda: {
               "block_spike": {"enabled": True, "threshold": 20, "state": "INSUFFICIENT_DATA"},
               "latency": {"enabled": False, "threshold_ms": 3000, "state": None}}}
 
+# Developers tab: local mode has no user pool, so show a small synthetic team.
+people = [("kim", "active", ["backend"]), ("lee", "active", ["backend", "data"]), ("park", "invited", ["data"]),
+          ("choi", "disabled", []), ("jung", "active", ["mobile"])]
+api.users.status = lambda: {
+    "available": True, "max_invites": 50,
+    "install": "client/install.sh --api-url https://abc123.execute-api.ap-northeast-2.amazonaws.com/guard/check --client-id 4example "
+               "--authorize-url https://decider-guard-dev.auth.ap-northeast-2.amazoncognito.com/oauth2/authorize "
+               "--token-url https://decider-guard-dev.auth.ap-northeast-2.amazoncognito.com/oauth2/token",
+    "users": [{"username": f"u-{n}", "email": f"{n}@{domain}", "state": st, "groups": gs,
+               "created": (now - dt.timedelta(days=3 + i)).astimezone().isoformat(timespec="seconds")} for i, (n, st, gs) in enumerate(people)],
+    "groups": [{"name": g, "description": d, "members": sum(g in p[2] for p in people)}
+               for g, d in (("backend", "API and services"), ("data", "Analytics"), ("mobile", "iOS and Android"))]}
+
 import http.server  # noqa: E402
 
 print(f"demo console: http://127.0.0.1:{args.port}  (data in {home})", flush=True)

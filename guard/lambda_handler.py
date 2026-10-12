@@ -87,6 +87,8 @@ def api_handler(event, context):
     """POST /guard/check (API Gateway HTTP API, payload v2). The authorizer has already verified the token."""
     claims = ((event["requestContext"].get("authorizer") or {}).get("jwt") or {}).get("claims") or {}
     user = claims.get("email") or claims.get("cognito:username") or claims.get("sub") or ""
+    groups = claims.get("cognito:groups") or ""   # a list, or "[a b]" as API Gateway passes array claims
+    groups = ",".join(groups) if isinstance(groups, list) else ",".join(groups.strip("[]").split())
     raw = event.get("body") or ""
     if event.get("isBase64Encoded"):
         raw = base64.b64decode(raw).decode("utf-8", errors="replace")
@@ -104,7 +106,7 @@ def api_handler(event, context):
         return _api_response(200, handler({"health": True}, context))
     # Only the admin console (IAM invoke) may test draft policies; developers always get the saved policy.
     return _api_response(200, check({"items": items, "client": str(body.get("client", ""))[:20], "lang": body.get("lang")}, context,
-                                    user, "token" if user else ""))
+                                    user, "token" if user else "", groups))
 
 
 def handler(event, context):
@@ -119,7 +121,7 @@ def handler(event, context):
     return check(event, context, user, "caller" if user else "")
 
 
-def check(event, context, user="", user_source=""):
+def check(event, context, user="", user_source="", groups=""):
     """user_source: "token" (verified by the API's JWT authorizer) or "caller" (reported by an IAM caller such as LiteLLM)."""
     dry_run = bool(event.get("dry_run"))
     lang = guard_core.lang_of(event.get("lang"))
@@ -141,6 +143,7 @@ def check(event, context, user="", user_source=""):
             "client": event.get("client", ""),
             "user": user,
             "user_source": user_source,
+            "groups": groups,
             "sources": ",".join(r["source"] for r in out["results"]),
             "categories": _categories(out),
             "basis": out["basis"] or "",

@@ -323,6 +323,8 @@ export class DeciderGuardStack extends cdk.Stack {
       if (!audience) throw new Error('devIssuer needs devAudience (the OIDC client id the hooks sign in with)');
       devAuthorizer = new HttpJwtAuthorizer('DevAuth', devIssuer, { jwtAudience: [audience] });
       new cdk.CfnOutput(this, 'DevIssuer', { value: devIssuer });
+      adminFn.addEnvironment('DEV_ISSUER', devIssuer);
+      adminFn.addEnvironment('DEV_CLIENT_ID', audience);
       new cdk.CfnOutput(this, 'DevClientId', { value: audience });
     } else {
       const devPool = new cognito.UserPool(this, 'Developers', {
@@ -333,7 +335,9 @@ export class DeciderGuardStack extends cdk.Stack {
         accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
         userInvitation: {
           emailSubject: 'PII guard sign-in / PII 가드 로그인',
-          emailBody: 'Your PII guard sign-in was created. Run: decider-guard login<br>PII 가드 로그인이 만들어졌습니다. 실행: decider-guard login<br>'
+          emailBody: `You are invited to the PII guard for coding agents. Install it as shown on ${consoleUrl}install.html ; `
+            + 'the installer opens a sign-in page where you use this temporary password and then choose your own.<br>'
+            + `PII 가드에 초대되었습니다. ${consoleUrl}install.html 안내대로 설치하면 로그인 페이지가 열립니다. 아래 임시 비밀번호로 로그인한 뒤 새 비밀번호를 정하세요.<br><br>`
             + 'ID: {username}<br>Temporary password / 임시 비밀번호: {####}',
         },
         removalPolicy: cdk.RemovalPolicy.DESTROY,
@@ -349,6 +353,17 @@ export class DeciderGuardStack extends cdk.Stack {
         refreshTokenValidity: cdk.Duration.days(Number(this.node.tryGetContext('devSessionDays') ?? 30)),
       });
       devAuthorizer = new HttpUserPoolAuthorizer('DevAuth', devPool, { userPoolClients: [devClient] });
+      // Users tab: invite, disable, delete and group developers (permissions on the existing admin role, no new role).
+      adminFn.addToRolePolicy(new iam.PolicyStatement({
+        actions: ['cognito-idp:ListUsers', 'cognito-idp:AdminGetUser', 'cognito-idp:AdminCreateUser', 'cognito-idp:AdminDisableUser',
+                  'cognito-idp:AdminEnableUser', 'cognito-idp:AdminDeleteUser', 'cognito-idp:AdminUserGlobalSignOut',
+                  'cognito-idp:ListGroups', 'cognito-idp:CreateGroup', 'cognito-idp:DeleteGroup', 'cognito-idp:ListUsersInGroup',
+                  'cognito-idp:AdminListGroupsForUser', 'cognito-idp:AdminAddUserToGroup', 'cognito-idp:AdminRemoveUserFromGroup'],
+        resources: [devPool.userPoolArn] }));
+      adminFn.addEnvironment('DEV_POOL_ID', devPool.userPoolId);
+      adminFn.addEnvironment('DEV_CLIENT_ID', devClient.userPoolClientId);
+      adminFn.addEnvironment('DEV_AUTHORIZE_URL', `${devDomain.baseUrl()}/oauth2/authorize`);
+      adminFn.addEnvironment('DEV_TOKEN_URL', `${devDomain.baseUrl()}/oauth2/token`);
       new cdk.CfnOutput(this, 'DevUserPoolId', { value: devPool.userPoolId });
       new cdk.CfnOutput(this, 'DevClientId', { value: devClient.userPoolClientId });
       new cdk.CfnOutput(this, 'DevAuthorizeUrl', { value: `${devDomain.baseUrl()}/oauth2/authorize` });
@@ -357,6 +372,7 @@ export class DeciderGuardStack extends cdk.Stack {
     api.addRoutes({ path: '/guard/check', methods: [apigw.HttpMethod.POST], authorizer: devAuthorizer,
                     integration: new HttpLambdaIntegration('GuardIntegration', guardFn) });
     new cdk.CfnOutput(this, 'GuardApiUrl', { value: `${api.apiEndpoint}/guard/check` });
+    adminFn.addEnvironment('GUARD_API_URL', `${api.apiEndpoint}/guard/check`);
 
     new cdk.CfnOutput(this, 'AdminUrl', { value: consoleUrl });
     new cdk.CfnOutput(this, 'ConsoleBucketName', { value: site.bucketName });

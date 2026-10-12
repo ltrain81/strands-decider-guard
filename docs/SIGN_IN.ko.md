@@ -52,19 +52,23 @@
 1. 콘솔을 켠 상태(기본값)로 배포합니다: `make deploy REGION=…`. 그러면 스택에 로그인 API 와 개발자 풀이 생깁니다.
    API Gateway 는 리소스 정책으로 guard 를 호출하므로 IAM 역할은 늘지 않습니다.
 2. 개발자 로그인을 만듭니다.
-   - `make add-dev DEV_EMAIL=<주소>`. Cognito 가 임시 비밀번호를 메일로 보내고, 첫 로그인 때 새 비밀번호를 정합니다.
+   - 콘솔 **개발자** 탭에서 이메일로 초대하고 그룹을 고릅니다 ([콘솔 가이드](ADMIN.ko.md#개발자-탭)). 또는 `make add-dev DEV_EMAIL=<주소>`.
+     Cognito 가 임시 비밀번호와 설치 페이지 링크를 메일로 보내고, 첫 로그인 때 새 비밀번호를 정합니다.
+   - 그룹은 ID 토큰(`cognito:groups`)에 담기므로 판정마다 함께 기록됩니다.
    - 규모가 크면 `Developers` 풀을 회사 IdP 와 연동하세요 (Cognito → *Sign-in experience → Federated identity providers*, SAML 또는 OIDC).
      그러면 회사 계정으로 로그인하고, 퇴사자는 IdP 에서 비활성화되는 즉시 갱신이 막힙니다.
    - Cognito 없이 회사 IdP 를 직접 쓸 수도 있습니다: `DEPLOY_ARGS="-c devIssuer=https://<IdP> -c devAudience=<client id>"`.
      IdP 에 redirect URI `http://localhost:8723/callback`, scope `openid email` 로 public client 를 등록하세요.
-3. 개발자에게 설치 명령을 줍니다. `outputs.json` 에는 비밀 값이 없어서 공유해도 됩니다. 아니면 값을 직접 넘깁니다:
+3. 개발자는 초대 메일에 링크된 설치 페이지 `<콘솔 주소>/install.html` 에서 설치합니다. 한 줄 명령
+   (`bash -c "$(curl -fsSL <콘솔 주소>/dev/install.sh)"`)이 콘솔 사이트에서 hook 을 내려받으므로 저장소가 필요 없습니다.
+   또는 설치 명령을 직접 줍니다. `outputs.json` 에는 비밀 값이 없어서 공유해도 됩니다. 아니면 값을 직접 넘깁니다:
    ```bash
    client/install.sh --outputs outputs.json --auth jwt
    # 또는
    client/install.sh --api-url <GuardApiUrl> --client-id <DevClientId> \
      --authorize-url <DevAuthorizeUrl> --token-url <DevTokenUrl>       # 외부 IdP: --issuer <DevIssuer>
    ```
-4. 접근을 회수하려면 사용자를 비활성화합니다 (`aws cognito-idp admin-disable-user`, 또는 IdP 에서). 그러면 갱신이 바로 실패합니다.
+4. 접근 회수: 개발자 탭에서 **비활성화** 또는 **삭제** (또는 IdP 에서). 세션이 끝나므로 갱신이 바로 실패합니다.
    이미 발급된 토큰은 만료될 때까지(최대 1시간) 동작합니다.
 
 콘솔의 로그 탭에서는 각 행의 상세와 CSV 에 사용자가 나오고, 검색창에서 대상뿐 아니라 사용자로도 찾을 수 있습니다.

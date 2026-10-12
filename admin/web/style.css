@@ -132,6 +132,14 @@ ul.reasons { margin: 14px 0 0; padding-left: 20px } ul.reasons li { margin: 4px 
 .chart-legend span { display: inline-flex; align-items: center; gap: 6px }
 .chart-legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block }
 
+/* developers tab */
+.cmd { display: flex; gap: 8px; align-items: flex-start }
+.cmd code { flex: 1; background: var(--surface-2); border-radius: 8px; padding: 10px 12px; font-size: 13px; word-break: break-all }
+.gchips { display: flex; flex-wrap: wrap; gap: 4px }
+.gchip { background: var(--surface-2); border-radius: 10px; padding: 1px 8px; font-size: 12.5px }
+.rowbtns { display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap }
+.groupedit { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 6px 0 }
+
 /* tables */
 table { width: 100%; border-collapse: collapse; font-size: 14px }
 th { text-align: left; color: var(--text-2); font-weight: 500; font-size: 13px; padding: 8px; border-bottom: 1px solid var(--line); white-space: nowrap }

@@ -147,19 +147,25 @@ cd demo/ko && claude
 
    | | 로그인 (`--auth jwt`, 권장) | IAM |
    |---|---|---|
-   | 개발자에게 필요한 것 | 로그인 계정: `make add-dev DEV_EMAIL=…` (Cognito 가 임시 비밀번호 발송), 또는 회사 IdP ([docs/SIGN_IN.ko.md](docs/SIGN_IN.ko.md)) | **`InvokePolicyArn`** 관리형 정책이 붙은 AWS 자격 증명 (guard 에 대한 `lambda:InvokeFunction` 만) |
+   | 개발자에게 필요한 것 | 콘솔 **개발자** 탭에서 보내는 초대 메일 (또는 `make add-dev DEV_EMAIL=…`), 또는 회사 IdP ([docs/SIGN_IN.ko.md](docs/SIGN_IN.ko.md)) | **`InvokePolicyArn`** 관리형 정책이 붙은 AWS 자격 증명 (guard 에 대한 `lambda:InvokeFunction` 만) |
    | 요청한 사람 기록 | 검증된 토큰에서 기록 | 기록 안 됨 |
    | 세션 | 30일, 이후 `decider-guard login` | AWS 자격 증명이 유효한 동안 |
 
-3. 개발자에게 `outputs.json` (비밀 정보 없음: 이름, ARN, URL)과 [개발자 설치 순서](#개발자-각-pc)를 전달합니다.
-   로그인 방식이면 계정을 먼저 만들어 두세요.
+3. **로그인 방식:** 콘솔 **개발자** 탭에서 초대합니다 (그룹 지정 가능). 메일에 설치 페이지(`<콘솔 주소>/install.html`) 링크가 있고,
+   그 페이지의 한 줄 명령으로 설치하므로 개발자는 AWS 접근도, 이 저장소도 필요 없습니다.
+   **IAM 방식:** 개발자에게 `outputs.json` (비밀 정보 없음: 이름, ARN, URL)과 [개발자 설치 순서](#개발자-각-pc)를 전달합니다.
 4. 운영:
    - `make console` 로 정책 콘솔을 엽니다: 정책, 테스트, 로그(사용자 포함), 알림. [콘솔 가이드](docs/ADMIN.ko.md) 참고.
    - `make status`, `make stop` / `make start` (GPU 호스트가 주요 비용입니다. [운영과 비용](#운영과-비용) 참고).
-   - 개발자 접근 회수: 로그인 계정을 비활성화합니다 (`aws cognito-idp admin-disable-user`, 또는 IdP 에서).
+   - 개발자 탭: 초대, 재발송, 비활성화, 삭제와 그룹 관리 ([콘솔 가이드](docs/ADMIN.ko.md#개발자-탭)). 판정 로그마다 사람과 그룹이 남습니다.
 5. 관리자 PC 도 보호하세요: `make add-dev DEV_EMAIL=<내 메일>` 후 `make install AUTH=jwt` (IAM 방식은 `make install`).
 
 ### 개발자 (각 PC)
+
+**초대 메일을 받았다면** 메일의 설치 페이지(`<콘솔 주소>/install.html`)를 열고 한 줄 명령을 실행하세요:
+`bash -c "$(curl -fsSL <콘솔 주소>/dev/install.sh)"`. hook 을 내려받고 로그인 페이지를 연 뒤 아래와 같은 과정을 진행합니다.
+
+저장소를 clone 해서 설치하려면:
 
 필요한 것: git, python3, Claude Code 또는 Codex, 관리자에게 받은 `outputs.json`, 임시 비밀번호가 담긴 메일.
 저장소를 clone 할 수 없으면 관리자가 압축 파일로 전달해도 됩니다. 설치에는 `client/` 와 `guard/guard_core.py` 만 쓰입니다.
