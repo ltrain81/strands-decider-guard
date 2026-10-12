@@ -116,6 +116,7 @@ async function loadOverview() {
       series: [{ key: 'p50', label: T('s_p50'), color: 'var(--series-1)' }, { key: 'p95', label: T('s_p95'), color: 'var(--series-2)' }] });
     bars($('#by-cat'), o.by_category, catLabel);
     bars($('#by-client'), o.by_client, clientLabel);
+    bars($('#by-basis'), o.by_basis || [], k => T('basis_' + k));
     $('#recent').innerHTML = logTable(o.recent, false);
     if (o.partial) toast(T('partial'));
   } catch (e) { $('#kpis').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
@@ -158,6 +159,15 @@ function renderPolicy() {
   $('#sens').innerHTML = m.sensitivities.map(s => `
     <div class="choice ${d.sensitivity === s.id ? 'on' : ''}" data-sens="${s.id}" role="radio" aria-checked="${d.sensitivity === s.id}" tabindex="0">
       <b>${esc(s.label)}</b><span>${esc(T('sens_' + s.id))}</span></div>`).join('');
+  $('#patterns').innerHTML = ['off', 'strong', 'assist'].map(v => `
+    <div class="choice ${d.patterns === v ? 'on' : ''}" data-pat="${v}" role="radio" aria-checked="${d.patterns === v}" tabindex="0">
+      <b>${T('pat_' + v)}</b><span>${T('pat_' + v + '_d')}</span></div>`).join('');
+  const ev = m.evidence || { available: false, days: 30 };
+  $('#ev-sub').textContent = T('ev_sub', { d: ev.days });
+  $('#evidence').innerHTML = ev.available ? ['off', 'blocked', 'all'].map(v => `
+    <div class="choice ${d.evidence === v ? 'on' : ''}" data-ev="${v}" role="radio" aria-checked="${d.evidence === v}" tabindex="0">
+      <b>${T('ev_' + v)}</b><span>${T('ev_' + v + '_d')}</span></div>`).join('') : `<p class="empty">${T('ev_na')}</p>`;
+  $('#ev-warn').textContent = ev.available ? T('ev_warn', { d: ev.days }) : '';
   $('#cats').innerHTML = m.categories.map(c => `
     <div class="cat"><div class="info"><b>${esc(c.label)}</b><span>${esc(c.desc)}</span></div>
       <div class="seg" data-cat="${c.id}" role="radiogroup" aria-label="${esc(c.label)}">${['block', 'ask', 'allow'].map(v =>
@@ -191,6 +201,8 @@ function markDirty() {
 
 function bindPolicy() {
   $('#sens').addEventListener('click', e => { const c = e.target.closest('[data-sens]'); if (!c) return; state.draft.sensitivity = c.dataset.sens; renderPolicy(); });
+  $('#patterns').addEventListener('click', e => { const c = e.target.closest('[data-pat]'); if (!c) return; state.draft.patterns = c.dataset.pat; renderPolicy(); });
+  $('#evidence').addEventListener('click', e => { const c = e.target.closest('[data-ev]'); if (!c) return; state.draft.evidence = c.dataset.ev; renderPolicy(); });
   $('#sens').addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset.sens) { e.preventDefault(); e.target.click(); } });
   $('#cats').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if (!b) return; state.draft.categories[b.parentElement.dataset.cat] = b.dataset.v; renderPolicy(); });
   $('#tpl').addEventListener('click', e => { const b = e.target.closest('[data-t]'); if (b) addRule(TEMPLATES[state.lang][b.dataset.t]); });
@@ -258,6 +270,7 @@ async function runTest() {
     const findings = r.decision === 'allow' ? [] : res.findings;
     box.innerHTML = `<div class="verdict ${r.decision}"><i>${icon}</i>${T('v_' + r.decision)}</div>
       ${findings.length ? `<ul class="reasons">${findings.map(f => `<li>${friendlyReason(f)}</li>`).join('')}</ul>` : `<p class="sub" style="margin-top:12px">${T('nothing_found')}</p>`}
+      ${res.basis_label ? `<p class="sub" style="margin-top:8px"><b>${esc(res.basis_label)}</b></p>` : ''}
       <p class="hint">${T('took', { ms: Math.round(res.latency_ms) })}${r.decision === 'ask' ? T('ask_note') : ''}</p>`;
   } catch (e) { box.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
@@ -277,10 +290,11 @@ function fillLogFilters() {
 function logTable(rows, detail = true) {
   if (!rows.length) return `<p class="empty">${T('no_logs')}</p>`;
   return `<table><thead><tr><th>${T('col_time')}</th><th>${T('col_decision')}</th><th>${T('col_tool')}</th><th>${T('col_target')}</th>
-    <th>${T('col_reason')}</th>${detail ? `<th class="num">${T('col_chars')}</th>` : ''}<th class="num">ms</th></tr></thead><tbody>
+    <th>${T('col_reason')}</th><th>${T('col_basis')}</th>${detail ? `<th class="num">${T('col_chars')}</th>` : ''}<th class="num">ms</th></tr></thead><tbody>
     ${rows.map((e, i) => `<tr class="${detail ? 'clickable' : ''}" data-row="${i}"><td>${esc(fmtTime(e.ts))}</td><td>${decisionPill(e.decision)}</td>
       <td>${esc(clientLabel(e.client))}</td><td>${esc(e.sources || '')}</td>
       <td>${esc((e.categories || '').split(',').filter(Boolean).map(catLabel).join(', '))}</td>
+      <td>${e.basis ? esc(T('basis_' + e.basis)) : ''}${e.evidence ? ' 📄' : ''}</td>
       ${detail ? `<td class="num">${fmtNum(e.chars)}</td>` : ''}<td class="num">${fmtNum(e.ms)}</td></tr>`).join('')}
     </tbody></table>`;
 }
@@ -302,11 +316,23 @@ function toggleLogDetail(tr) {
   const next = tr.nextElementSibling;
   if (next?.classList.contains('detail')) { next.remove(); return; }
   const e = state.logs[tr.dataset.row];
-  tr.insertAdjacentHTML('afterend', `<tr class="detail"><td colspan="7"><pre>${esc(JSON.stringify(e, null, 2))}</pre></td></tr>`);
+  tr.insertAdjacentHTML('afterend', `<tr class="detail"><td colspan="8"><pre>${esc(JSON.stringify(e, null, 2))}</pre>
+    ${e.evidence ? `<button class="btn small" data-evidence="${esc(e.evidence)}">${T('view_text')}</button><div class="evidence"></div>` : ''}</td></tr>`);
+}
+
+async function showEvidence(btn) {
+  const box = btn.nextElementSibling;
+  if (box.innerHTML) { box.innerHTML = ''; btn.textContent = T('view_text'); return; }
+  try {
+    const ev = await api(`/api/evidence?key=${encodeURIComponent(btn.dataset.evidence)}`);
+    box.innerHTML = ev.items.map(i => `<p class="hint"><b>${esc(i.source)}</b> · ${T('v_' + i.decision)}${i.basis ? ' · ' + esc(T('basis_' + i.basis)) : ''}${i.truncated ? ' · …' : ''}</p>
+      <pre style="background:#fff;border:1px solid var(--line);border-radius:6px;padding:8px">${esc(i.text)}</pre>`).join('');
+    btn.textContent = T('hide_text');
+  } catch (err) { box.innerHTML = `<p class="err">${esc(T('ev_expired'))}</p>`; }
 }
 
 function exportCsv() {
-  const cols = ['ts', 'decision', 'client', 'sources', 'categories', 'chars', 'ms', 'request_id'];
+  const cols = ['ts', 'decision', 'client', 'sources', 'categories', 'basis', 'chars', 'ms', 'request_id'];
   const cell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const csv = [cols.join(','), ...state.logs.map(r => cols.map(c => cell(r[c])).join(','))].join('\n');
   const a = document.createElement('a');
@@ -326,6 +352,8 @@ function renderChange(c) {
     case 'allow_added': return T('ch_allow_added', { list: list(c.list), value: esc(c.value) });
     case 'allow_removed': return T('ch_allow_removed', { list: list(c.list), value: esc(c.value) });
     case 'message': return T('ch_message');
+    case 'patterns': return T('ch_patterns', { from: T('pat_' + c.from), to: T('pat_' + c.to) });
+    case 'evidence': return c.from !== undefined ? T('ch_evidence', { from: T('ev_' + c.from), to: T('ev_' + c.to) }) : esc(c.value || '');
     case 'email_added': return T('ch_email_added', { value: esc(c.value) });
     case 'email_removed': return T('ch_email_removed', { value: esc(c.value) });
     case 'rule': return T('ch_alert_rule', { name: T('r_' + c.id), state: (c.enabled ? T('on') : T('off')) +
@@ -486,7 +514,10 @@ async function main() {
   $('#ov-to-logs').onclick = () => { $('#lg-decision').value = ''; $('#lg-hours').value = $('#ov-hours').value; showTab('logs'); };
   $('#lg-search').onclick = loadLogs; $('#lg-export').onclick = exportCsv;
   $('#lg-q').addEventListener('keydown', e => { if (e.key === 'Enter') loadLogs(); });
-  $('#logs').addEventListener('click', e => { const tr = e.target.closest('tr.clickable'); if (tr) toggleLogDetail(tr); });
+  $('#logs').addEventListener('click', e => {
+    const b = e.target.closest('[data-evidence]'); if (b) return showEvidence(b);
+    const tr = e.target.closest('tr.clickable'); if (tr) toggleLogDetail(tr);
+  });
   $('#versions').addEventListener('click', e => {
     const c = e.target.closest('[data-compare]'); if (c) return compareVersion(c);
     const b = e.target.closest('[data-load]'); if (b) loadVersion(b.dataset.load, b.dataset.when);

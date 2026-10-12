@@ -51,11 +51,12 @@ def decide(f, t):
             continue
         if t["weak_ps"] is not None and c["weak"] and ps >= t["weak_ps"]:
             return "block"
-        if t["named_cat"] is not None and named >= t["named"] and ps >= t["named_cat"]:
+        nr = t.get("named_real", 0)          # the named-person paths also need some real-value signal
+        if t["named_cat"] is not None and named >= t["named"] and p >= nr and ps >= t["named_cat"]:
             return "block"
         if ps < t["cat"]:
             continue
-        if named >= t["named"] or (c["weak"] and p >= t["pattern"]) or p >= t["block"]:
+        if (named >= t["named"] and p >= nr) or (c["weak"] and p >= t["pattern"]) or p >= t["block"]:
             return "block"
         if p >= t["ask"]:
             best = "ask"

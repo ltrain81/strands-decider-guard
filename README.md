@@ -55,6 +55,16 @@ Admins:
 The diagram source is [`docs/images/architecture.drawio`](docs/images/architecture.drawio); open it in
 [draw.io](https://app.diagrams.net), which includes the AWS icons.
 
+**strands-decider makes the decisions; regexes only help.**
+- A few values are certain from their format alone: resident registration numbers, Luhn-valid card numbers, AWS keys and private keys.
+  Regexes block those without a model call.
+- Emails, phone numbers and similar patterns are *hints*: the model decides whether they matter.
+- Everything else is the model's call alone: context such as a named person's health or HR situation, company rules, and telling code
+  or schemas apart from real data.
+- The console's **Pattern checks** setting can switch regexes off to show the model alone. On the benchmark that gave 54 % recall and 1.7 %
+  false positives; with patterns as hints it gave 70 % / 3.4 %.
+- Every decision records who made it (format check, model on a pattern hint, model alone, company rule), and the Overview tab charts it.
+
 Each check makes **one** model call. The model reads the text once and answers several questions about it:
 which kind of sensitive data appears, whether it is about a specific person, whether it holds real values
 (not field names or placeholders), plus each of your custom rules. Clear-cut patterns, such as a resident
@@ -211,6 +221,21 @@ and HR/legal sets, and developer-style text. The thresholds were tuned on one ha
   - Regex-only blocks: under 1 ms.
 - One GPU host sustains about 3.5 checks/s. More concurrent requests queue up rather than run faster.
 - Check your own data on the console's Test tab before relying on these numbers.
+### What the numbers mean
+
+Positives are texts that contain personal data and should be blocked; negatives are texts that don't and should pass.
+
+| Metric | Meaning | Formula |
+|---|---|---|
+| **Recall** | share of the personal-data texts the guard blocked | blocked positives ÷ all positives |
+| **Precision** | share of the blocked texts that really contained personal data | blocked positives ÷ everything blocked |
+| **False-positive rate (FPR)** | share of the clean texts the guard blocked by mistake | blocked negatives ÷ all negatives |
+| **F1** | one number balancing recall and precision | 2 · P · R ÷ (P + R) |
+
+Low recall means personal data gets through; a high false-positive rate means developers get blocked for nothing. The sensitivity
+presets move the balance between the two. "Developer text" is the false-positive rate measured on code, SQL, configs and technical
+questions only, which is closest to what developers feel.
+
 ## Limitations
 
 - **Client hooks are not enforcement.** A user can remove them. For enforcement:
@@ -222,6 +247,10 @@ and HR/legal sets, and developer-style text. The thresholds were tuned on one ha
   - Kiro CLI cannot block prompts.
   - Codex treats hook failures and timeouts as "allow".
   - Claude Code's Grep results and `@file` mentions are not seen by the hooks.
+- **Original text is off by default.** The console's *Keep original text* setting stores the checked text so admins can review
+  decisions. It keeps blocked/asked checks only, or everything. The text is stored in an encrypted S3 bucket, deleted after 30 days
+  (`-c evidenceDays=N`), readable only by console admins, and every view is recorded. Turning it on means that bucket holds the very
+  data you are trying to protect, so decide with your privacy officer.
 - Long inputs are sampled: up to 16 chunks of 1,500 characters. The regexes still scan the whole text (up to 256 KB per file).
 - The decider server has no authentication. Only the guard Lambda's security group can reach it. Its behaviour
   under concurrent requests is not documented upstream.

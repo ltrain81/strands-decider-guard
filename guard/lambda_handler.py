@@ -19,6 +19,8 @@ log = logging.getLogger()
 log.setLevel(logging.INFO)
 
 POLICY_BUCKET = os.environ.get("POLICY_BUCKET")
+EVIDENCE_BUCKET = os.environ.get("EVIDENCE_BUCKET")   # opt-in text capture (policy "evidence"), expires by lifecycle rule
+EVIDENCE_CHARS = 4000
 POLICY_KEY = os.environ.get("POLICY_KEY", "policy.json")
 POLICY_TTL = 30
 _cache = {"at": 0.0, "policy": None}
@@ -42,6 +44,26 @@ def current_policy():
     return policy
 
 
+def overall_basis(out):
+    return next((r.get("basis") for r in out["results"] if r["decision"] == out["decision"] and r.get("basis")), None)
+
+
+def save_evidence(items, out, policy, client, request_id):
+    """Store the checked text when the policy asks for it. Returns the S3 key (logged; the text itself never is)."""
+    mode = policy.get("evidence", "off")
+    if mode == "off" or not EVIDENCE_BUCKET or (mode == "blocked" and out["decision"] == "allow"):
+        return None
+    import boto3
+    key = f"evidence/{time.strftime('%Y/%m/%d', time.gmtime())}/{request_id}.json"
+    body = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "client": client, "decision": out["decision"],
+            "items": [{"source": i.get("source", ""), "text": i.get("text", "")[:EVIDENCE_CHARS],
+                       "truncated": len(i.get("text", "")) > EVIDENCE_CHARS, "decision": r["decision"], "basis": r.get("basis"),
+                       "reasons": r.get("reasons", [])} for i, r in zip(items, out["results"])]}
+    boto3.client("s3").put_object(Bucket=EVIDENCE_BUCKET, Key=key, Body=json.dumps(body, ensure_ascii=False).encode(),
+                                  ContentType="application/json")
+    return key
+
+
 def _categories(result):
     cats = set()
     for r in result["results"]:
@@ -63,13 +85,21 @@ def handler(event, context):
     t0 = time.time()
     out = guard_core.check_many(items, policy=policy, lang=lang)
     out["policy_updated_at"] = policy.get("updated_at")
+    out["basis"] = overall_basis(out)
     if not dry_run:
+        try:
+            out["evidence"] = save_evidence(items, out, policy, event.get("client", ""), getattr(context, "aws_request_id", None) or str(time.time()))
+        except Exception as e:  # never fail a check because the evidence copy failed
+            log.error(json.dumps({"evidence_error": repr(e)[:300]}))
+            out["evidence"] = None
         # A bare JSON line (not logging's "[INFO] ts id ..." prefix) so CloudWatch metric filters can match on fields.
         print(json.dumps({
             "decision": out["decision"],
             "client": event.get("client", ""),
             "sources": ",".join(r["source"] for r in out["results"]),
             "categories": _categories(out),
+            "basis": out["basis"] or "",
+            "evidence": out.get("evidence") or "",
             "chars": sum(len(i.get("text", "")) for i in items),
             "ms": round((time.time() - t0) * 1000),
         }, ensure_ascii=False), flush=True)

@@ -97,7 +97,10 @@ def call_guard(cfg, items, client):
                 policy = json.load(f)
         except FileNotFoundError:
             pass
-        return guard_core.check_many(items, cfg["decider_url"], policy, language(cfg))
+        out = guard_core.check_many(items, cfg["decider_url"], policy, language(cfg))
+        out["basis"] = next((r.get("basis") for r in out["results"] if r["decision"] == out["decision"] and r.get("basis")), None)
+        out["evidence"] = save_local_evidence(items, out, guard_core.normalize_policy(policy), client)
+        return out
     payload = {"items": items, "client": client, "lang": language(cfg)}
     try:
         import boto3
@@ -111,6 +114,24 @@ def call_guard(cfg, items, client):
         return out
     except ImportError:
         return _invoke_with_cli(cfg, payload)
+
+
+def save_local_evidence(items, out, policy, client):
+    """Local mode counterpart of the guard Lambda's evidence capture (policy "evidence": blocked | all)."""
+    mode = policy.get("evidence", "off")
+    if mode == "off" or (mode == "blocked" and out["decision"] == "allow"):
+        return None
+    import uuid
+    eid = uuid.uuid4().hex
+    folder = os.path.join(HOME, "evidence")
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    body = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "client": client, "decision": out["decision"],
+            "items": [{"source": i["source"], "text": i["text"][:4000], "truncated": len(i["text"]) > 4000, "decision": r["decision"],
+                       "basis": r.get("basis"), "reasons": r.get("reasons", [])} for i, r in zip(items, out["results"])]}
+    path = os.path.join(folder, eid + ".json")
+    with open(os.open(path, os.O_WRONLY | os.O_CREAT, 0o600), "w") as f:
+        json.dump(body, f, ensure_ascii=False)
+    return "local/" + eid
 
 
 def _invoke_with_cli(cfg, payload):
@@ -220,6 +241,9 @@ def summarize(verdict):
     for r in verdict.get("results", []):
         if r["decision"] != "allow":
             reasons += [f"[{r['source']}] {x}" for x in r.get("reasons", [])]
+    label = next((r.get("basis_label") for r in verdict.get("results", []) if r["decision"] != "allow" and r.get("basis_label")), "")
+    if label:
+        reasons.append(label)
     return reasons
 
 
@@ -314,8 +338,9 @@ def run_hook(agent):
         decision = "allow"
 
     audit({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "agent": agent, "event": event, "tool": tool, "decision": decision,
-           "types": sorted({f["type"] for r in verdict.get("results", []) for f in r.get("findings", [])}),
-           "sources": [i["source"] for i in items], "ms": round((time.time() - t0) * 1000)})
+           "types": sorted({f["type"] for r in verdict.get("results", []) for f in r.get("findings", []) if f["source"] != "degraded"}),
+           "sources": [i["source"] for i in items], "ms": round((time.time() - t0) * 1000),
+           "basis": verdict.get("basis"), "evidence": verdict.get("evidence")})
     return emit(cfg, agent, event, decision, block_message(cfg, decision, reasons, where, verdict.get("message", ""), unreachable), reasons)
 
 

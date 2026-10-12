@@ -24,6 +24,8 @@ ALARM_PREFIX = env("ALARM_PREFIX", "DeciderGuard-")
 METRIC_NAMESPACE = env("METRIC_NAMESPACE", "DeciderGuard")
 SCHEDULE = env("SCHEDULE", "")                      # e.g. "MON-FRI 08:00-20:00" (host auto start/stop), empty = always on
 SCHEDULE_UTC_OFFSET = float(env("SCHEDULE_UTC_OFFSET", "9"))
+EVIDENCE_BUCKET = env("EVIDENCE_BUCKET")
+EVIDENCE_DAYS = int(env("EVIDENCE_DAYS", "30"))
 POLICY_FILE = env("POLICY_FILE")
 LOCAL_DECIDER_URL = env("LOCAL_DECIDER_URL")
 AUDIT_LOG = env("AUDIT_LOG")
@@ -122,7 +124,7 @@ def local_events(hours):
                     "tool": e.get("tool") or ("prompt" if e.get("event") == "UserPromptSubmit" else ""),
                     "sources": ",".join(e.get("sources", [])),
                     "categories": ",".join(sorted({CATEGORY_OF_TYPE.get(t, t) for t in e.get("types", [])})),
-                    "ms": e.get("ms"),
+                    "ms": e.get("ms"), "basis": e.get("basis") or "", "evidence": e.get("evidence") or "",
                 })
     except FileNotFoundError:
         pass

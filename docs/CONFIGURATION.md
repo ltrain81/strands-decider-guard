@@ -59,10 +59,17 @@ locally. All keys are optional; missing keys take the defaults shown.
      "question": "Does the text include unreleased schedules, revenue or launch plans for project 'Phoenix' (PHX)?"}
   ],
   "allow": {"email_domains": ["example.com"], "terms": ["Jane Doe"]},
-  "message": "Mask customer data before use. Questions: #privacy-help"
+  "message": "Mask customer data before use. Questions: #privacy-help",
+  "patterns": "assist",
+  "evidence": "off"
 }
 ```
 
+- `patterns`: `off` (the model decides alone), `strong` (only checksum/format-certain patterns: resident numbers, valid card
+  numbers, AWS and private keys), `assist` (also email/phone/ID hints that the model then judges; default).
+- `evidence`: `off` (default), `blocked` (keep the text of blocked/asked checks) or `all`. Text goes to the evidence bucket
+  (encrypted, deleted after `evidenceDays`, default 30) and is shown in the console's Logs tab; each view is logged as admin activity.
+  Local mode keeps it in `~/.decider-guard/evidence/` (files readable only by you).
 - Actions are `block`, `ask` and `allow`. `allow` means the type is not checked at all.
 - Limits: 20 rules, 300-character questions, 100 allowlist entries of up to 100 characters each.
 
@@ -117,6 +124,7 @@ The CDK context lives in `cdk/cdk.json`. Override a value with `-c key=value` in
 | `console` | `true` | `false` skips the policy console (one fewer IAM role, no CloudFront/Cognito/API) |
 | `amiId` | — | Set automatically on redeploys so a newer GPU AMI does not replace the running host |
 | `schedule`, `scheduleUtcOffset` | — , `9` | run the host only in this window, e.g. `MON-FRI 08:00-20:00` (`./deploy.sh --schedule … --utc-offset 9`); kept across redeploys, `--schedule none` removes it |
+| `evidenceDays` | `30` | days before kept original text is deleted (evidence bucket lifecycle rule) |
 | `spot` | `false` | run the host on Spot, a persistent request that stops on interruption (`--spot` / `--on-demand`; switching replaces the host) |
 
 Guard Lambda environment:

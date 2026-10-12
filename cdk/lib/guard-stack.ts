@@ -114,6 +114,12 @@ export class DeciderGuardStack extends cdk.Stack {
       (host.node.defaultChild as ec2.CfnInstance).launchTemplate = { launchTemplateId: lt.launchTemplateId, version: lt.latestVersionNumber };
     }
 
+    // Opt-in evidence (policy "evidence": blocked | all): checked text kept for admins, deleted after evidenceDays.
+    const evidenceDays = Number(this.node.tryGetContext('evidenceDays') ?? 30);
+    const evidenceBucket = new s3.Bucket(this, 'EvidenceBucket', {
+      enforceSSL: true, blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL, encryption: s3.BucketEncryption.S3_MANAGED,
+      removalPolicy: cdk.RemovalPolicy.DESTROY, lifecycleRules: [{ expiration: cdk.Duration.days(evidenceDays) }],
+    });
     const guardLogs = new logs.LogGroup(this, 'GuardFnLogs', { retention: logs.RetentionDays.ONE_MONTH, removalPolicy: cdk.RemovalPolicy.DESTROY });
     const fn = new lambda.Function(this, 'GuardFn', {
       runtime: lambda.Runtime.PYTHON_3_12,
@@ -124,10 +130,12 @@ export class DeciderGuardStack extends cdk.Stack {
       securityGroups: [lambdaSg],
       timeout: cdk.Duration.seconds(60),
       memorySize: 256,
-      environment: { DECIDER_URL: `http://${host.instancePrivateIp}:8000`, POLICY_BUCKET: policyBucket.bucketName, POLICY_KEY: 'policy.json' },
+      environment: { DECIDER_URL: `http://${host.instancePrivateIp}:8000`, POLICY_BUCKET: policyBucket.bucketName, POLICY_KEY: 'policy.json',
+                     EVIDENCE_BUCKET: evidenceBucket.bucketName },
       logGroup: guardLogs,
     });
     policyBucket.grantRead(fn);
+    evidenceBucket.grantPut(fn, 'evidence/*');
 
     // Attach this to the IAM users/roles your developers use for Bedrock.
     const invokePolicy = new iam.ManagedPolicy(this, 'InvokeGuardPolicy', {
@@ -136,7 +144,7 @@ export class DeciderGuardStack extends cdk.Stack {
     });
 
     if (this.node.tryGetContext('console') !== 'false' && this.node.tryGetContext('console') !== false) {
-      this.adminConsole(fn, guardLogs, policyBucket, host);
+      this.adminConsole(fn, guardLogs, policyBucket, host, evidenceBucket, evidenceDays);
     }
 
     new cdk.CfnOutput(this, 'GuardFunctionName', { value: fn.functionName });
@@ -145,13 +153,15 @@ export class DeciderGuardStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'DeciderInstanceId', { value: host.instanceId });
     new cdk.CfnOutput(this, 'Region', { value: this.region });
     new cdk.CfnOutput(this, 'Market', { value: spot ? 'spot' : 'on-demand' });
+    new cdk.CfnOutput(this, 'EvidenceBucketName', { value: evidenceBucket.bucketName });
   }
 
   /**
    * Policy console: S3 + CloudFront static site, Cognito login, HTTP API -> admin Lambda.
    * Adds exactly one IAM role (the admin Lambda's). The site files are uploaded by `ctl.sh publish-console`.
    */
-  private adminConsole(guardFn: lambda.Function, guardLogs: logs.LogGroup, policyBucket: s3.Bucket, host: ec2.Instance) {
+  private adminConsole(guardFn: lambda.Function, guardLogs: logs.LogGroup, policyBucket: s3.Bucket, host: ec2.Instance,
+                       evidenceBucket: s3.Bucket, evidenceDays: number) {
     const site = new s3.Bucket(this, 'ConsoleSite', {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL, enforceSSL: true, encryption: s3.BucketEncryption.S3_MANAGED,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
@@ -232,10 +242,12 @@ export class DeciderGuardStack extends cdk.Stack {
         GUARD_LOG_GROUP: guardLogs.logGroupName, ADMIN_LOG_GROUP: adminLogs.logGroupName, GUARD_INSTANCE_ID: host.instanceId,
         ALERTS_TOPIC: topic.topicArn, ALARM_PREFIX: alarmPrefix, METRIC_NAMESPACE: namespace,
         SCHEDULE: schedule ?? '', SCHEDULE_UTC_OFFSET: String(utcOffset),
+        EVIDENCE_BUCKET: evidenceBucket.bucketName, EVIDENCE_DAYS: String(evidenceDays),
       },
       logGroup: adminLogs,
     });
     policyBucket.grantReadWrite(adminFn);
+    evidenceBucket.grantRead(adminFn, 'evidence/*');
     guardFn.grantInvoke(adminFn);
     adminFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:StartQuery'], resources: [guardLogs.logGroupArn, adminLogs.logGroupArn] }));
     adminFn.addToRolePolicy(new iam.PolicyStatement({

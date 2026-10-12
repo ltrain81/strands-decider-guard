@@ -189,6 +189,43 @@ class Judgement(unittest.TestCase):
         self.assertIn("주민등록번호", r["reasons"][0])
 
 
+class PatternModeAndBasis(unittest.TestCase):
+    def test_pattern_modes(self):
+        text = "id " + RRN + " mail " + MAIL("ops")
+        self.assertEqual(check(text)[0]["basis"], "pattern")                             # assist: certain format blocks
+        r, fake = check(text, {"patterns": "off"})
+        self.assertEqual((r["decision"], r["findings"]), ("allow", []))                  # off: no regex at all, model says none
+        self.assertTrue(fake.calls)
+        r, _ = check("mail " + MAIL("ops"), {"patterns": "strong"}, kind="contact", named=0.1, real=0.1)
+        self.assertEqual(r["findings"], [])                                              # strong: weak hints are not used
+        with self.assertRaises(ValueError):
+            g.normalize_policy({"patterns": "maybe"})
+
+    def test_basis(self):
+        self.assertEqual(check("x" * 20, kind="health", named=0.9)[0]["basis"], "model")
+        r, _ = check("write to " + MAIL("ops"), kind="contact", named=0.1, real=0.1, p_kind=0.5)
+        self.assertEqual((r["decision"], r["basis"]), ("block", "model_pattern"))
+        self.assertTrue(r["basis_label"])
+        rule = {"custom_rules": [{"id": "x", "question": "q?", "action": "block"}]}
+        self.assertEqual(check("plan for project x", rule, rules={"rule_x": 0.9})[0]["basis"], "rule")
+
+
+class LambdaEvidence(unittest.TestCase):
+    def test_evidence_capture_respects_the_policy(self):
+        import lambda_handler as lh
+        items = [{"source": "prompt", "text": "id " + RRN}]
+        out = g.check_many(items)
+        s3 = mock.MagicMock()
+        with mock.patch.object(lh, "EVIDENCE_BUCKET", "bucket"), mock.patch.dict(sys.modules, {"boto3": mock.MagicMock(client=lambda n: s3)}):
+            self.assertIsNone(lh.save_evidence(items, out, {"evidence": "off"}, "claude", "rid"))
+            key = lh.save_evidence(items, out, {"evidence": "blocked"}, "claude", "rid")
+            self.assertTrue(key.startswith("evidence/") and key.endswith("/rid.json"))
+            body = json.loads(s3.put_object.call_args.kwargs["Body"])
+            self.assertEqual((body["items"][0]["source"], body["items"][0]["decision"]), ("prompt", "block"))
+            allowed = g.check_many([{"source": "prompt", "text": "hi"}])
+            self.assertIsNone(lh.save_evidence([{"source": "prompt", "text": "hi"}], allowed, {"evidence": "blocked"}, "c", "r2"))
+
+
 class Hook(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -322,8 +359,8 @@ class AdminApi(unittest.TestCase):
             for d, types in (("block", ["kr_resident_id"]), ("allow", []), ("ask", ["email"])):
                 f.write(json.dumps({"ts": now, "agent": "claude", "event": "PreToolUse", "tool": "Read",
                                     "decision": d, "types": types, "sources": ["file:a.csv"], "ms": 200}) + "\n")
-        import common, monitoring, alerts, handler
-        for mod in (common, monitoring, alerts, handler):
+        import common, monitoring, alerts, evidence, handler
+        for mod in (common, monitoring, alerts, evidence, handler):
             importlib.reload(mod)
         self.api, self.monitoring, self.alerts = handler, monitoring, alerts
 
@@ -370,6 +407,18 @@ class AdminApi(unittest.TestCase):
         rows = self.call("GET", "/api/activity")[1]["rows"]
         self.assertEqual((rows[0]["action"], rows[0]["detail"][0]["kind"]), ("policy_saved", "sensitivity"))
         self.assertEqual(self.call("GET", "/api/alerts")[1], {"available": False})
+
+    def test_local_evidence_roundtrip_is_audited(self):
+        sys.path.insert(0, os.path.join(ROOT, "client"))
+        os.environ["DECIDER_GUARD_HOME"] = self.tmp.name
+        import decider_guard
+        h = importlib.reload(decider_guard)
+        verdict = {"decision": "block", "results": [{"decision": "block", "basis": "pattern", "reasons": ["r"]}]}
+        key = h.save_local_evidence([{"source": "prompt", "text": "secret text"}], verdict, {"evidence": "blocked"}, "claude")
+        os.environ.pop("DECIDER_GUARD_HOME")
+        code, ev = self.call("GET", "/api/evidence", query={"key": key})
+        self.assertEqual((code, ev["items"][0]["text"]), (200, "secret text"))
+        self.assertEqual(self.call("GET", "/api/evidence", query={"key": "../../etc/passwd"})[0], 400)
 
     def test_policy_changes(self):
         old = g.normalize_policy({"custom_rules": [{"id": "a", "name": "A", "question": "a?"}], "allow": {"terms": ["x"]}})

@@ -39,6 +39,15 @@ The first screen: is the guard working, and what is it doing?
 | **Balanced (recommended)** | most teams | 70 % · 3.4 % · 3.1 % |
 | Strict | finance, healthcare: missing something is worse | 76 % · 4.7 % · 6.2 % |
 
+### Pattern checks
+
+How much the guard relies on regular expressions next to the model:
+- **Off:** the model decides everything. Use it to show what strands-decider does on its own.
+- **Certain formats only:** regexes block only values a format check can confirm (resident numbers, valid card numbers, keys).
+- **Assist (recommended):** the above, plus email / phone / ID hints that the model then judges. This has the highest recall.
+
+Every decision records who made it. The Overview tab charts it, and the Logs tab shows it per check.
+
 ### Actions by information type
 
 Pick **Block**, **Ask** or **Allow** for each type:
@@ -84,6 +93,13 @@ Allowlisted values are removed from the text before it is checked. With `Jane Do
 ### Block message
 
 Shown to developers when something is blocked. A good place for your support channel.
+
+### Keep original text
+
+Off by default. When on, the checked text is stored so you can open it from a row in the Logs tab ("Show original text"):
+- **Blocked and asked only**, or **Everything**.
+- The text is encrypted, deleted after 30 days and readable only by console admins. Every view appears in Admin activity.
+- The stored text can contain exactly the personal data the guard blocks, so agree on this with your privacy officer first.
 
 ### Saving
 

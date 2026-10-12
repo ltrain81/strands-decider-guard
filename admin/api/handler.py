@@ -21,9 +21,11 @@ import json
 import os
 
 import alerts
+import evidence
 import guard_core
 import monitoring
-from common import GUARD_FUNCTION, GUARD_INSTANCE_ID, LOCAL_DECIDER_URL, POLICY_BUCKET, POLICY_FILE, POLICY_KEY, aws
+from common import (EVIDENCE_BUCKET, EVIDENCE_DAYS, GUARD_FUNCTION, GUARD_INSTANCE_ID, LOCAL_DECIDER_URL, POLICY_BUCKET, POLICY_FILE,
+                    POLICY_KEY, aws)
 
 MAX_TEST_CHARS = 20000
 MESSAGES = {
@@ -39,6 +41,7 @@ def meta(lang):
         "labels": guard_core.PATTERN_LABELS[lang],
         "limits": guard_core.LIMITS,
         "local": bool(POLICY_FILE),
+        "evidence": {"available": bool(POLICY_FILE or EVIDENCE_BUCKET), "days": EVIDENCE_DAYS},
     }
 
 
@@ -171,6 +174,10 @@ def route(method, path, body, q, user, lang):
         return monitoring.decision_log(q)
     if path == "/api/activity" and method == "GET":
         return monitoring.admin_activity(_hours(q, "168"))
+    if path == "/api/evidence" and method == "GET":
+        out = evidence.read(q.get("key", ""))
+        audit("evidence_viewed", user, [{"kind": "evidence", "value": q.get("key", "")}])
+        return out
     if path == "/api/alerts" and method == "GET":
         return alerts.status()
     if path == "/api/alerts" and method == "PUT":

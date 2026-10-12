@@ -47,6 +47,9 @@ def policy_changes(old, new):
             out.append({"kind": "allow_removed", "list": key, "value": v})
     if (old.get("message") or "") != (new.get("message") or ""):
         out.append({"kind": "message"})
+    for key in ("patterns", "evidence"):
+        if old.get(key) != new.get(key):
+            out.append({"kind": key, "from": old.get(key), "to": new.get(key)})
     return out
 
 
@@ -116,7 +119,8 @@ def overview(hours, policy):
         "overall": "filter ispresent(ms) | stats pct(ms, 50) as p50, pct(ms, 95) as p95",
         "by_category": "filter decision != 'allow' | stats count(*) as n by categories | sort n desc | limit 20",
         "by_client": "filter ispresent(decision) | stats count(*) as n by client | sort n desc | limit 10",
-        "recent": "filter decision != 'allow' | sort @timestamp desc | limit 10 | fields @timestamp, decision, client, sources, categories, ms",
+        "by_basis": "filter decision != 'allow' and ispresent(basis) | stats count(*) as n by basis | sort n desc",
+        "recent": "filter decision != 'allow' | sort @timestamp desc | limit 10 | fields @timestamp, decision, client, sources, categories, ms, basis, evidence",
     }, hours)
     series = {t: {"t": t, "allow": 0, "ask": 0, "block": 0} for t in bins}
     for r in res["series"]:
@@ -138,9 +142,18 @@ def overview(hours, policy):
             "series": list(series.values()), "latency": list(latency.values()), "errors": errors,
             "by_category": _split_counts(res["by_category"], "categories"),
             "by_client": [{"key": r.get("client") or "-", "n": int(r["n"])} for r in res["by_client"]],
+            "by_basis": [{"key": r.get("basis"), "n": int(r["n"])} for r in res["by_basis"] if r.get("basis")],
             "recent": [{"ts": iso_from_insights(r.get("@timestamp")), "decision": r.get("decision"), "client": r.get("client"),
-                        "sources": r.get("sources"), "categories": r.get("categories"), "ms": r.get("ms")} for r in res["recent"]],
+                        "sources": r.get("sources"), "categories": r.get("categories"), "ms": r.get("ms"),
+                        "basis": r.get("basis"), "evidence": r.get("evidence")} for r in res["recent"]],
             "partial": partial}
+
+
+def _count(values):
+    out = {}
+    for v in values:
+        out[v] = out.get(v, 0) + 1
+    return out
 
 
 def _f(v):
@@ -199,7 +212,8 @@ def _local_overview(hours, step, bins):
         "errors": [],
         "by_category": _split_counts([{"categories": e["categories"], "n": 1} for e in flagged], "categories"),
         "by_client": [{"key": k, "n": n} for k, n in sorted(clients.items(), key=lambda kv: -kv[1])],
-        "recent": [{k: e[k] for k in ("ts", "decision", "client", "sources", "categories", "ms")}
+        "by_basis": [{"key": k, "n": n} for k, n in sorted(_count(e["basis"] for e in flagged if e["basis"]).items(), key=lambda kv: -kv[1])],
+        "recent": [{k: e[k] for k in ("ts", "decision", "client", "sources", "categories", "ms", "basis", "evidence")}
                    for e in sorted(flagged, key=lambda e: e["_t"], reverse=True)[:10]],
         "partial": False,
     }
@@ -227,7 +241,7 @@ def decision_log(params):
                 and (not category or category in e["categories"].split(",")) and (not q or q.lower() in e["sources"].lower())]
         rows.sort(key=lambda e: e["_t"], reverse=True)
         return {"rows": [{k: v for k, v in e.items() if k != "_t"} for e in rows[:limit]], "truncated": len(rows) > limit}
-    parts = ["fields @timestamp, decision, client, sources, categories, chars, ms, @requestId", "filter ispresent(decision)"]
+    parts = ["fields @timestamp, decision, client, sources, categories, chars, ms, basis, evidence, @requestId", "filter ispresent(decision)"]
     if decisions:
         parts.append("filter decision in [" + ", ".join(f'"{d}"' for d in decisions) + "]")
     if client:
@@ -240,7 +254,8 @@ def decision_log(params):
     res, partial = insights(GUARD_LOG_GROUP, {"rows": " | ".join(parts)}, hours)
     rows = [{"ts": iso_from_insights(r.get("@timestamp")), "decision": r.get("decision"), "client": r.get("client"),
              "sources": r.get("sources"), "categories": r.get("categories"), "chars": _int(r.get("chars")),
-             "ms": _int(r.get("ms")), "request_id": r.get("@requestId")} for r in res["rows"]]
+             "ms": _int(r.get("ms")), "basis": r.get("basis"), "evidence": r.get("evidence"), "request_id": r.get("@requestId")}
+            for r in res["rows"]]
     return {"rows": rows[:limit], "truncated": len(rows) > limit, "partial": partial}
 
 

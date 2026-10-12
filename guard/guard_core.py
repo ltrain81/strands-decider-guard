@@ -72,6 +72,10 @@ TEXT = {
         "bad_action": "{v}: action must be block, ask or allow", "too_many_rules": "At most {n} custom rules",
         "empty_question": "Rule {i}: the question is empty", "long_question": "Rule {i}: keep the question under {n} characters",
         "bad_rule": "Rule {i}: invalid action or sensitivity", "bad_allow": "Too many or too long allowlist entries",
+        "bad_mode": "{k}: unknown value {v}",
+        "basis_pattern": "decided by format check (pattern)", "basis_model_pattern": "decided by the model, prompted by a pattern",
+        "basis_model": "decided by the model alone", "basis_rule": "decided by a company rule (model)",
+        "basis_degraded": "decided by patterns only (model unavailable)",
         "rule_hit": "custom rule '{name}' matched (p={p})", "pattern": "{label} pattern found ({sample})",
         "model": "{label} (decider: sensitive {s}, specific person {n}, real PII {r})",
         "degraded": "model unavailable: checked with patterns only",
@@ -81,6 +85,10 @@ TEXT = {
         "bad_action": "{v}: 동작은 block/ask/allow 중 하나여야 합니다", "too_many_rules": "사용자 규칙은 최대 {n}개입니다",
         "empty_question": "규칙 {i}: 질문이 비어 있습니다", "long_question": "규칙 {i}: 질문은 {n}자 이내로 써 주세요",
         "bad_rule": "규칙 {i}: 동작 또는 민감도 값이 잘못되었습니다", "bad_allow": "허용 목록 항목이 너무 많거나 깁니다",
+        "bad_mode": "{k}: 알 수 없는 값 {v}",
+        "basis_pattern": "판정 근거: 형식 검사(패턴)", "basis_model_pattern": "판정 근거: 패턴이 찾은 후보를 모델이 판단",
+        "basis_model": "판정 근거: 모델 단독 판단", "basis_rule": "판정 근거: 회사 규칙(모델)",
+        "basis_degraded": "판정 근거: 패턴만 (모델 사용 불가)",
         "rule_hit": "사용자 규칙 '{name}' 에 해당 (확률 {p})", "pattern": "{label} 패턴 감지 ({sample})",
         "model": "{label} 판단 (decider: 민감 유형 확률 {s}, 특정인 확률 {n}, 실제 PII 확률 {r})",
         "degraded": "모델에 연결할 수 없어 패턴으로만 검사했습니다",
@@ -102,7 +110,11 @@ DEFAULT_POLICY = {
     "custom_rules": [],   # [{"id", "name", "question", "action", "sensitivity", "enabled"}]
     "allow": {"email_domains": [], "terms": []},
     "message": "",
+    "patterns": "assist",   # off: the model decides alone | strong: only checksum/format-certain patterns | assist: + weak hints
+    "evidence": "off",      # off | blocked | all: keep the checked text (encrypted, expiring) for admins to review
 }
+PATTERN_MODES = ("off", "strong", "assist")
+EVIDENCE_MODES = ("off", "blocked", "all")
 LIMITS = {"rules": 20, "question": 300, "name": 60, "allow_items": 100, "allow_item": 100, "message": 500}
 
 
@@ -147,6 +159,11 @@ def normalize_policy(p, lang="en"):
             raise ValueError(t(lang, "bad_allow"))
         out["allow"][key] = [v.lstrip("@").lower() for v in vals] if key == "email_domains" else vals
     out["message"] = str(p.get("message") or "")[:LIMITS["message"]]
+    for key, allowed in (("patterns", PATTERN_MODES), ("evidence", EVIDENCE_MODES)):
+        v = p.get(key, out[key])
+        if v not in allowed:
+            raise ValueError(t(lang, "bad_mode", k=key, v=v))
+        out[key] = v
     for k in ("updated_at", "updated_by"):
         if p.get(k):
             out[k] = str(p[k])[:100]
@@ -225,8 +242,11 @@ def apply_allowlist(text, policy):
 
 
 def scan_patterns(text, policy):
+    mode = policy.get("patterns", "assist")
     hits = []
     for name, rx, strong, ok in PATTERNS:
+        if mode == "off" or (mode == "strong" and not strong):
+            continue
         action = policy["categories"][CATEGORY_OF_PATTERN[name]]
         if action == "allow":
             continue
@@ -322,19 +342,24 @@ def judge_chunk(a, weak_hit, policy):
                "p_pii": round(p, 3), "p_named": round(named, 3)}
     if kind == "credential" and probs["credential"] >= t["cat"]:
         # placeholders such as ${DB_PASSWORD} look like credentials but carry no real value
+        finding["path"] = "model"
         return (_cap("block", action), finding) if p >= t["cred_real"] else ("allow", None)
+    path = "model"
     if t["weak_ps"] is not None and weak_hit and p_sensitive >= t["weak_ps"]:
-        decision = "block"                # an email/phone/... pattern the model sees as at least somewhat sensitive
+        decision, path = "block", "model_pattern"   # an email/phone/... pattern the model sees as at least somewhat sensitive
     elif t["named_cat"] is not None and named >= t["named"] and p_sensitive >= t["named_cat"]:
         decision = "block"                # a named person in a moderately sensitive context
     elif p_sensitive < t["cat"]:          # public figures, code, statistics: no sensitive category
         decision = "allow"
-    elif named >= t["named"] or (weak_hit and p >= t["pattern"]) or p >= t["block"]:
+    elif named >= t["named"] or p >= t["block"]:
         decision = "block"
+    elif weak_hit and p >= t["pattern"]:
+        decision, path = "block", "model_pattern"
     elif p >= t["ask"]:                   # e.g. SQL selecting name/email columns
         decision = "ask"
     else:
         decision = "allow"
+    finding["path"] = path
     return _cap(decision, action), finding
 
 
@@ -394,6 +419,8 @@ def check(text, decider_url=None, policy=None, lang="en", degrade=True):
                 break
     for f in result["findings"]:
         f.pop("pos", None)
+    result["basis"] = basis_of(result)
+    result["basis_label"] = t(lang, "basis_" + result["basis"]) if result["basis"] else ""
     result["reasons"] = [describe(f, lang) for f in result["findings"]] if result["decision"] != "allow" else []
     result["latency_ms"] = round((time.time() - t0) * 1000, 1)
     return result
@@ -410,6 +437,22 @@ PATTERN_LABELS = {
            "kr_passport": "여권번호", "bank_account": "계좌번호", "contact": "개인 연락처/신원 정보", "government_id": "신분증 번호",
            "financial": "금융 정보", "health": "건강/의료 정보", "private_life": "인사·법률·사생활 정보", "credential": "비밀번호/인증 정보"},
 }
+
+
+def basis_of(result):
+    """Which part of the guard made a non-allow decision: pattern | model_pattern | model | rule | degraded (None if allowed)."""
+    if result["decision"] == "allow":
+        return None
+    sev = SEVERITY[result["decision"]]
+    fs = result["findings"]
+    if any(f["source"] == "regex" and f.get("strong") and SEVERITY[f.get("action", "block")] >= sev for f in fs):
+        return "pattern"
+    for f in fs:
+        if f["source"] == "decider":
+            return f.get("path", "model")
+        if f["source"] == "rule":
+            return "rule"
+    return "degraded" if result.get("degraded") else "pattern"
 
 
 def describe(f, lang="en"):
