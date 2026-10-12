@@ -48,7 +48,9 @@ UserPromptSubmit operation blocked by hook:
 
 ![아키텍처: 개발자 PC 의 hook 이 guard Lambda 를 호출하고, guard 는 GPU 호스트의 strands-decider 에 묻습니다. 관리자는 콘솔에서 정책을 편집합니다](docs/images/architecture.png)
 
-1. hook 이 프롬프트, 또는 도구 입력과 그 도구가 다루는 파일을 guard Lambda 로 보냅니다 (`lambda:Invoke`, IAM 인증).
+1. hook 이 프롬프트, 또는 도구 입력과 그 도구가 다루는 파일을 guard Lambda 로 보냅니다. PC 마다 두 방식 중 하나를 씁니다:
+   ① **IAM** (개발자 AWS 자격 증명으로 `lambda:Invoke`) 또는 ①′ **로그인** (ID 토큰을 API Gateway 로 보내면 검증 후 사용자와 그룹을 함께 전달).
+   한 배포가 두 방식을 모두 받습니다. 비교는 [docs/SIGN_IN.ko.md](docs/SIGN_IN.ko.md).
 2. guard 는 정규식을 먼저 보고, GPU 호스트의 strands-decider 를 private IP 로 **한 번** 호출합니다.
 3. S3 게이트웨이 엔드포인트로 읽은 현재 정책을 적용합니다 (30초 캐시).
 4. 판정, 유형, 크기만 로그로 남기고 원문은 남기지 않습니다.

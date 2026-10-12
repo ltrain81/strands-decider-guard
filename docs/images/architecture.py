@@ -60,7 +60,7 @@ cx = shape("Codex CLI", "client", "#232F3D", 160, 165, top=True)
 kr = shape("Kiro CLI<br><i>(opt-in, tool calls)</i>", "client", "#7D8998", 260, 165, top=True)
 hook = box("<b>PII guard hook</b><br>client/decider_guard.py<br><font color='#5A6C86'>prompts · Read/Write/Edit · Bash<br>+ files a command reads · Bash output</font>",
            45, 255, 280, 86, fill="#F4F6F8", stroke="#7D8998")
-box("<b>decider-guard login</b>: browser sign-in, no AWS keys<br><b>allow</b> → continue &nbsp; <b>ask</b> → user confirms<br><b>block</b> → masked reasons + who decided", 45, 385, 280, 68,
+box("each machine uses <b>one</b> mode: ① IAM or ①′ sign-in<br><b>allow</b> → continue &nbsp; <b>ask</b> → user confirms<br><b>block</b> → masked reasons + who decided", 45, 385, 280, 68,
     fill="#FFFFFF", stroke="#D5DBDB", extra="fontSize=11;")
 for a_ in (cc, cx, kr):
     edge(a_, hook, "", color=DEV, width=1.5)
@@ -96,7 +96,7 @@ adm = service("<b>Admin Lambda</b><br>policy · tests · stats · alerts", "lamb
 eb = service("<b>EventBridge</b><br>health check (5 min)<br>host schedule (optional)", "eventbridge", "#E7157B", 1420, 830)
 
 # ---- flows
-edge(hook, guard, "① lambda:Invoke (IAM)", color=DEV, exit=(1, 0.5), entry=(0, 0.5))
+edge(hook, guard, "① IAM mode: lambda:Invoke", color=DEV, exit=(1, 0.5), entry=(0, 0.5))
 edge(ll, guard, "", color=DEV, dashed=1, exit=(1, 0.5), entry=(0, 0.75), pts=[(420, 559), (420, 314)])
 edge(guard, ec2, "② one model call (private IP)", color=DEV, exit=(1, 0.5), entry=(0, 0.5))
 edge(guard, gwe, "③ policy, evidence", color=DEV, exit=(0.5, 1), entry=(0.5, 0))
@@ -112,7 +112,7 @@ edge(cog, api, "ID token", color=ADM, dashed=1, exit=(0.5, 0), entry=(0.714, 1),
 edge(api, adm, "", color=ADM, exit=(0.3, 1), entry=(0.25, 0), pts=[(617, 700), (1174, 700)])
 edge(adm, s3, "Ⓑ save policy version · view original (audited)", color=ADM, exit=(0.75, 0), entry=(0.5, 1), pts=[(1202, 640), (1377, 640)])
 edge(eb, adm, "", color=ADM, dashed=1, exit=(0, 0.5), entry=(1, 0.5))
-edge(hook, api, "①′ sign-in", color=DEV, exit=(1, 0.8), entry=(0, 0.5), pts=[(375, 325), (375, 658)])
+edge(hook, api, "①′ sign-in mode", color=DEV, exit=(1, 0.8), entry=(0, 0.5), pts=[(375, 325), (375, 658)])
 edge(api, guard, "user from token", color=DEV, exit=(0.5, 0), entry=(0, 0.92), pts=[(628, 325)])
 
 out = ['<mxfile host="drawio"><diagram name="architecture" id="arch"><mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" '

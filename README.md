@@ -43,7 +43,9 @@ More detail: [Configuration reference](docs/CONFIGURATION.md) · [Policy console
 
 ![Architecture: hooks on the developer machine call a guard Lambda, which asks strands-decider on a GPU host; admins edit the policy in a console](docs/images/architecture.png)
 
-1. The hook sends the prompt, or the tool input and the file it touches, to the guard Lambda (`lambda:Invoke`, IAM-authenticated).
+1. The hook sends the prompt, or the tool input and the file it touches, to the guard Lambda. Each machine uses one of two modes:
+   ① **IAM** (`lambda:Invoke` with the developer's AWS credentials) or ①′ **sign-in** (an ID token to API Gateway, which checks it and
+   passes the user and groups on). One deployment serves both; [docs/SIGN_IN.md](docs/SIGN_IN.md) compares them.
 2. The guard runs the regexes, then makes **one** call to strands-decider on the GPU host over a private IP.
 3. It applies the current policy, read from S3 through a gateway endpoint and cached for 30 s.
 4. It logs only the decision, types and sizes, never the text.
