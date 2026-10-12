@@ -18,7 +18,7 @@ ID="$(out DeciderInstanceId)"
 case "${1:-status}" in
   status)
     aws ec2 describe-instances --instance-ids "$ID" --query 'Reservations[0].Instances[0].[InstanceId,InstanceType,State.Name]' --output text
-    invoke_guard '{"health": true}' | python3 -c 'import json,sys; d=json.load(sys.stdin); print("guard:", "ok -", d["decider"]["model"], "on", d["decider"]["device"]) if d.get("ok") else print("guard: not ready -", d.get("error"))' ;;
+    invoke_guard '{"health": true}' | python3 -c 'import json,sys; d=json.load(sys.stdin); print("guard:", "ok -", d["decider"]["model"], "on", d["decider"]["device"]) if d.get("ok") else print("guard: up, model unavailable (host stopped or starting); checks use patterns only -", d.get("error"))' ;;
   health)
     invoke_guard '{"health": true}' | python3 -m json.tool ;;
   start)
