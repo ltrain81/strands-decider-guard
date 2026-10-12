@@ -52,7 +52,7 @@ MSG = {
         "login_open": "Opening the sign-in page. If no browser opens, visit:\n  {url}",
         "login_paste": "Open this URL in a browser, sign in, then paste the address you land on (http://localhost:8723/...):\n  {url}\n> ",
         "login_done": "Signed in as {user}. The session lasts until {until} unless revoked.",
-        "login_page": "Signed in to the PII guard. You can close this tab.",
+        "login_page": "Sign-in received. Return to the terminal to see whether it finished; you can close this tab.",
         "logout_done": "Signed out (token removed).",
     },
     "ko": {
@@ -74,7 +74,7 @@ MSG = {
         "login_open": "로그인 페이지를 엽니다. 브라우저가 열리지 않으면 이 주소로 가세요:\n  {url}",
         "login_paste": "브라우저에서 이 주소를 열어 로그인한 뒤, 도착한 주소(http://localhost:8723/...)를 붙여 넣으세요:\n  {url}\n> ",
         "login_done": "{user} 로 로그인했습니다. 세션은 {until} 까지 유지됩니다.",
-        "login_page": "PII guard 에 로그인했습니다. 이 탭은 닫아도 됩니다.",
+        "login_page": "로그인 정보를 받았습니다. 완료 여부는 터미널에서 확인하세요. 이 탭은 닫아도 됩니다.",
         "logout_done": "로그아웃했습니다 (토큰 삭제).",
     },
 }
@@ -187,13 +187,42 @@ class NotSignedIn(Exception):
     pass
 
 
+_SSL = None
+
+
+def ssl_context():
+    """Verified TLS that also works when this Python ships without CA certificates (e.g. Homebrew with a broken
+    ca-certificates link): honours SSL_CERT_FILE / REQUESTS_CA_BUNDLE / AWS_CA_BUNDLE, else on macOS falls back to the
+    system and keychain roots (which include company CAs used by TLS-inspecting proxies)."""
+    global _SSL
+    if _SSL is not None:
+        return _SSL
+    import ssl
+    bundle = next((os.environ[k] for k in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "AWS_CA_BUNDLE") if os.environ.get(k)), None)
+    ctx = ssl.create_default_context(cafile=bundle)
+    if not bundle and not ctx.cert_store_stats().get("x509_ca") and sys.platform == "darwin":
+        pem = os.path.join(HOME, "macos-roots.pem")
+        if not os.path.exists(pem) or time.time() - os.path.getmtime(pem) > 7 * 86400:
+            r = subprocess.run(["security", "find-certificate", "-a", "-p", "/System/Library/Keychains/SystemRootCertificates.keychain",
+                                "/Library/Keychains/System.keychain"], capture_output=True, text=True, timeout=20)
+            if "BEGIN CERTIFICATE" in r.stdout:
+                os.makedirs(HOME, exist_ok=True)
+                with open(pem + ".tmp", "w") as f:
+                    f.write(r.stdout)
+                os.replace(pem + ".tmp", pem)
+        if os.path.exists(pem):
+            ctx.load_verify_locations(cafile=pem)
+    _SSL = ctx
+    return ctx
+
+
 def _http_json(url, data=None, headers=None, timeout=10):
     import urllib.parse
     import urllib.request
     if isinstance(data, dict):
         data = urllib.parse.urlencode(data).encode()
         headers = {"Content-Type": "application/x-www-form-urlencoded", **(headers or {})}
-    with urllib.request.urlopen(urllib.request.Request(url, data, headers or {}), timeout=timeout) as r:
+    with urllib.request.urlopen(urllib.request.Request(url, data, headers or {}), timeout=timeout, context=ssl_context()) as r:
         return json.load(r)
 
 
@@ -252,7 +281,7 @@ def call_api(cfg, payload):
     req = urllib.request.Request(cfg["api_url"], json.dumps(payload).encode(),
                                  {"Content-Type": "application/json", "Authorization": "Bearer " + id_token(cfg)})
     try:
-        with urllib.request.urlopen(req, timeout=25) as r:
+        with urllib.request.urlopen(req, timeout=25, context=ssl_context()) as r:
             return json.load(r)
     except urllib.error.HTTPError as e:
         if e.code == 401:
