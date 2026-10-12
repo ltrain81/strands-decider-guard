@@ -69,6 +69,8 @@ wire_api = "responses"
 
 - Only the **newest turn** is checked: the user prompt and tool results after the last assistant message.
   Earlier turns were checked when they were new. Texts that already passed are remembered by hash.
+- Each check is logged with the LiteLLM key's user (`user_email`, `user_id`, `key_alias` or team, whichever is set) as
+  `user`, marked `user_source: caller` because the guard takes the proxy's word for it (signed-in hooks are `token`).
 - System and developer prompts, and the model's own function-call arguments, are skipped.
 - A block is HTTP 400. The error carries masked reasons (`reasons`) and your console block message.
   If the guard is unreachable, `fail_mode: closed` returns 503.

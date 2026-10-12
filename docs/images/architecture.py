@@ -65,12 +65,12 @@ box("<b>decider-guard login</b>: browser sign-in, no AWS keys<br><b>allow</b> �
 for a_ in (cc, cx, kr):
     edge(a_, hook, "", color=DEV, width=1.5)
 box("", 20, 520, 330, 120, fill="#FFFFFF", stroke="#7D8998", extra="dashed=1;")
-ll = shape("<b>LiteLLM proxy</b> (optional)<br>decider_guardrail.py calls the guard Lambda", "traditional_server", "#7D8998", 161, 535, 36, 48)
-admin = shape("Policy admin<br>(browser)", "user", "#232F3D", 161, 760)
+ll = shape("<b>LiteLLM proxy</b> (optional)<br>calls the guard with its IAM role,<br>logged with the LiteLLM key's user", "traditional_server", "#7D8998", 161, 535, 36, 48)
+admin = shape("Policy admin<br>(browser)", "user", "#232F3D", 161, 870)
 
 # ---- AWS
-group("AWS Cloud", "group_aws_cloud_alt", "#232F3E", "#232F3E", 400, 60, 1340, 830)
-group("Region", "group_region", "#00A4A6", "#147EBA", 420, 95, 1305, 780, dashed=1)
+group("AWS Cloud", "group_aws_cloud_alt", "#232F3E", "#232F3E", 400, 60, 1340, 940)
+group("Region", "group_region", "#00A4A6", "#147EBA", 420, 95, 1305, 890, dashed=1)
 group("VPC", "group_vpc2", "#8C4FFF", "#8C4FFF", 445, 130, 790, 470)
 group("Public subnet", "group_security_group", "#7AA116", "#248814", 465, 170, 200, 230, fill="#F2F6E8", extra="grStroke=0;")
 group("Isolated subnet", "group_security_group", "#00A4A6", "#147EBA", 685, 170, 250, 230, fill="#E6F6F7", extra="grStroke=0;")
@@ -88,15 +88,15 @@ s3 = box("<b>Amazon S3</b>", 1270, 340, 215, 230, fill="#F2F6E8", stroke="#7AA11
 policy = service("<b>Policy bucket</b><br>versioned", "s3", "#7AA116", 1290, 380, label_at=LABEL_RIGHT)
 evid = service("<b>Evidence bucket</b><br>opt-in, 30-day expiry", "s3", "#7AA116", 1290, 480, label_at=LABEL_RIGHT)
 
-group("Policy console", "group_security_group", "#7D8998", "#5A6C86", 445, 650, 1260, 200, extra="grStroke=0;")
-cf = service("<b>CloudFront</b><br>console (S3 site)", "cloudfront", "#8C4FFF", 500, 720)
-cog = service("<b>Cognito</b><br>admin sign-in", "cognito", "#DD344C", 720, 720)
-api = service("<b>API Gateway</b><br>HTTP API + JWT<br><font color='#5A6C86'>/api (admins) · /guard/check (hooks)</font>", "api_gateway", "#E7157B", 940, 720)
-adm = service("<b>Admin Lambda</b><br>policy · tests · stats · alerts", "lambda", "#ED7100", 1160, 720)
-eb = service("<b>EventBridge</b><br>health check (5 min)<br>host schedule (optional)", "eventbridge", "#E7157B", 1420, 720)
+group("Policy console", "group_security_group", "#7D8998", "#5A6C86", 445, 760, 1260, 200, extra="grStroke=0;")
+cf = service("<b>CloudFront</b><br>console (S3 site)", "cloudfront", "#8C4FFF", 500, 830)
+cog = service("<b>Cognito</b><br>admin sign-in", "cognito", "#DD344C", 720, 830)
+api = service("<b>API Gateway</b> (HTTP API, JWT authorizers)<br>/guard/check: hooks, developer pool<br>/api/*: console, admin pool", "api_gateway", "#E7157B", 600, 630, label_at=LABEL_RIGHT)
+adm = service("<b>Admin Lambda</b><br>policy · tests · stats · alerts", "lambda", "#ED7100", 1160, 830)
+eb = service("<b>EventBridge</b><br>health check (5 min)<br>host schedule (optional)", "eventbridge", "#E7157B", 1420, 830)
 
 # ---- flows
-edge(hook, guard, "① lambda:Invoke (IAM) — or JWT via API Gateway", color=DEV, exit=(1, 0.5), entry=(0, 0.5))
+edge(hook, guard, "① lambda:Invoke (IAM)", color=DEV, exit=(1, 0.5), entry=(0, 0.5))
 edge(ll, guard, "", color=DEV, dashed=1, exit=(1, 0.5), entry=(0, 0.75), pts=[(420, 559), (420, 314)])
 edge(guard, ec2, "② one model call (private IP)", color=DEV, exit=(1, 0.5), entry=(0, 0.5))
 edge(guard, gwe, "③ policy, evidence", color=DEV, exit=(0.5, 1), entry=(0.5, 0))
@@ -108,14 +108,15 @@ edge(nat, inet, "", color=NET, dashed=1, exit=(0.5, 0), entry=(0.5, 1))
 edge(logs, sns, "alarms", color=ADM, dashed=1, exit=(1, 0.5), entry=(0, 0.5))
 edge(admin, cf, "Ⓐ open console", color=ADM, exit=(1, 0.5), entry=(0, 0.5))
 edge(cf, cog, "sign in", color=ADM, dashed=1)
-edge(cog, api, "ID token", color=ADM, dashed=1)
-edge(api, adm, "", color=ADM)
-edge(adm, s3, "Ⓑ save policy version · view original (audited)", color=ADM, exit=(0.5, 0), entry=(0.5, 1), pts=[(1188, 640), (1377, 640)])
-edge(adm, guard, "test (dry run)", color=ADM, dashed=1, exit=(0.2, 0), entry=(0, 0.92), pts=[(1171, 680), (740, 680), (740, 325)])
+edge(cog, api, "ID token", color=ADM, dashed=1, exit=(0.5, 0), entry=(0.714, 1), pts=[(748, 720), (640, 720)])
+edge(api, adm, "", color=ADM, exit=(0.3, 1), entry=(0.25, 0), pts=[(617, 700), (1174, 700)])
+edge(adm, s3, "Ⓑ save policy version · view original (audited)", color=ADM, exit=(0.75, 0), entry=(0.5, 1), pts=[(1202, 640), (1377, 640)])
 edge(eb, adm, "", color=ADM, dashed=1, exit=(0, 0.5), entry=(1, 0.5))
+edge(hook, api, "①′ sign-in", color=DEV, exit=(1, 0.8), entry=(0, 0.5), pts=[(375, 325), (375, 658)])
+edge(api, guard, "user from token", color=DEV, exit=(0.5, 0), entry=(0, 0.92), pts=[(628, 325)])
 
 out = ['<mxfile host="drawio"><diagram name="architecture" id="arch"><mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" '
-       'tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1760" pageHeight="1000" background="#FFFFFF" math="0" shadow="0">'
+       'tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1760" pageHeight="1110" background="#FFFFFF" math="0" shadow="0">'
        '<root><mxCell id="0"/><mxCell id="1" parent="0"/>']
 for i, label, st, x, y, w, h, parent in cells:
     out.append(f'<mxCell id="{i}" value="{escape(label, {chr(34): "&quot;"})}" style="{st}" vertex="1" parent="{parent}">'

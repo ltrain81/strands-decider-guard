@@ -109,6 +109,15 @@ def _has_tool_result(m) -> bool:
     return isinstance(c, list) and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c)
 
 
+def key_user(auth) -> str:
+    """Who the LiteLLM key belongs to (set by the proxy admin, unlike the request's own "user" field)."""
+    for attr in ("user_email", "user_id", "key_alias", "team_alias", "team_id"):
+        v = getattr(auth, attr, None)
+        if v:
+            return str(v)
+    return ""
+
+
 class DeciderGuardrail(CustomGuardrail):
     def __init__(self, backend: str = "lambda", function_name: Optional[str] = None, region: Optional[str] = None,
                  decider_url: Optional[str] = None, block_on_ask: Any = True, fail_mode: str = "closed",
@@ -125,7 +134,7 @@ class DeciderGuardrail(CustomGuardrail):
         super().__init__(**kwargs)
 
     # ---- backend ----
-    def _check_sync(self, items):
+    def _check_sync(self, items, user=""):
         if self.backend == "http":
             import guard_core
             return guard_core.check_many(items, self.decider_url, lang=self.language)
@@ -133,7 +142,7 @@ class DeciderGuardrail(CustomGuardrail):
             import boto3
             from botocore.config import Config
             self._lambda = boto3.client("lambda", region_name=self.region, config=Config(read_timeout=30, retries={"max_attempts": 2}))
-        resp = self._lambda.invoke(FunctionName=self.function_name, Payload=json.dumps({"items": items, "client": "litellm", "lang": self.language}).encode())
+        resp = self._lambda.invoke(FunctionName=self.function_name, Payload=json.dumps({"items": items, "client": "litellm", "lang": self.language, "user": user}).encode())
         out = json.load(resp["Payload"])
         if resp.get("FunctionError"):
             raise RuntimeError(out.get("errorMessage", str(out)))
@@ -156,7 +165,7 @@ class DeciderGuardrail(CustomGuardrail):
         if not fresh:
             return data
         try:
-            verdict = await asyncio.to_thread(self._check_sync, [it for _, it in fresh])
+            verdict = await asyncio.to_thread(self._check_sync, [it for _, it in fresh], key_user(user_api_key_dict))
         except Exception as e:
             if self.fail_mode == "closed":
                 raise HTTPException(status_code=503, detail={"error": f"[PII guard] {MESSAGES[self.language]['unavailable']}: {str(e)[:200]}"})

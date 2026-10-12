@@ -62,6 +62,8 @@ wire_api = "responses"
 
 - 검사 대상은 **가장 최근 턴**뿐입니다. 마지막 assistant 메시지 이후의 사용자 프롬프트와 tool result 를 봅니다.
   이전 턴은 새로 들어왔을 때 이미 검사했고, 통과한 텍스트는 해시로 기억해 다시 검사하지 않습니다.
+- 검사마다 LiteLLM 키의 사용자(`user_email`, `user_id`, `key_alias`, 팀 중 설정된 것)가 `user` 로 남습니다.
+  guard 는 프록시가 알려 준 값을 믿는 것이므로 `user_source: caller` 로 표시됩니다 (로그인한 hook 은 `token`).
 - system / developer 프롬프트는 검사하지 않습니다. 모델이 직접 만든 function call 인자도 건너뜁니다.
 - 차단 응답은 HTTP 400 입니다. 오류 메시지에 마스킹된 근거(`reasons`)와 콘솔의 차단 안내 문구가 들어 있습니다.
 - 오류 메시지 언어는 guardrail 설정의 `language: en|ko` 로 정합니다.

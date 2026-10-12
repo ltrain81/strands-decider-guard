@@ -67,9 +67,24 @@ class GuardApi(unittest.TestCase):
         self.assertEqual(self.call(None, raw="{not json")[0], 400)
         self.assertEqual(self.call(None, raw="x" * 2_000_001)[0], 413)
 
-    def test_direct_invoke_cannot_claim_a_user(self):
-        _, logs = quiet_handler({"items": [{"source": "prompt", "text": "hello"}], "user": "forged"})
-        self.assertEqual(logs[-1]["user"], "")
+    def test_user_source_tells_verified_from_reported(self):
+        _, logs = quiet_handler({"items": [{"source": "prompt", "text": "hello"}], "user": "litellm-key-user"})
+        self.assertEqual((logs[-1]["user"], logs[-1]["user_source"]), ("litellm-key-user", "caller"))   # IAM caller's word
+        _, logs = quiet_handler({"items": [{"source": "prompt", "text": "hello"}]})
+        self.assertEqual((logs[-1]["user"], logs[-1]["user_source"]), ("", ""))
+        logs = self.call({"items": [{"source": "prompt", "text": "hello"}]})[2]
+        self.assertEqual(logs[-1]["user_source"], "token")
+
+    def test_litellm_sends_the_key_user(self):
+        sys.path.insert(0, os.path.join(ROOT, "litellm"))
+        stub = type(sys)("stub")
+        stub.CustomGuardrail, stub.HTTPException = object, Exception
+        with mock.patch.dict(sys.modules, {"litellm": stub, "litellm.integrations": stub, "litellm.integrations.custom_guardrail": stub,
+                                           "fastapi": stub}):
+            import decider_guardrail as dg
+        auth = type("Auth", (), {"user_email": None, "user_id": "u-42", "key_alias": "ci-key"})()
+        self.assertEqual(dg.key_user(auth), "u-42")
+        self.assertEqual(dg.key_user(object()), "")
 
 
 class FakeIdp(http.server.BaseHTTPRequestHandler):

@@ -1,11 +1,13 @@
 """Lambda entry point.
 
   {"items": [{"source", "text"}], "client": "claude", "lang": "en"}   -> verdict under the saved policy
+      optional "user": who the caller acts for (the LiteLLM guardrail sends the key's user); logged with
+      user_source "caller", since a direct invoke cannot prove it
   {"items": [...], "policy": {...}, "dry_run": true}    -> verdict under a draft policy (admin console test; not logged)
   {"health": true}                                      -> decider status
 
 Also served as POST /guard/check behind an API Gateway JWT authorizer (hooks with --auth jwt): the body is the first or
-third form, the signed-in user (from the token) is logged with the decision, and draft policies are refused.
+third form, the signed-in user (from the token) is logged with user_source "token", and draft policies are refused.
 
 The policy is read from S3 (POLICY_BUCKET/POLICY_KEY, saved by the admin console) and cached
 for 30 s; a missing policy means the defaults. Logs only decisions, sources, categories and
@@ -101,7 +103,8 @@ def api_handler(event, context):
     if body.get("health"):
         return _api_response(200, handler({"health": True}, context))
     # Only the admin console (IAM invoke) may test draft policies; developers always get the saved policy.
-    return _api_response(200, check({"items": items, "client": str(body.get("client", ""))[:20], "lang": body.get("lang")}, context, user))
+    return _api_response(200, check({"items": items, "client": str(body.get("client", ""))[:20], "lang": body.get("lang")}, context,
+                                    user, "token" if user else ""))
 
 
 def handler(event, context):
@@ -112,11 +115,12 @@ def handler(event, context):
             return {"ok": True, "decider": guard_core.health()}
         except Exception as e:
             return {"ok": False, "error": str(e)}
-    return check(event, context)
+    user = str(event.get("user") or "")[:200]
+    return check(event, context, user, "caller" if user else "")
 
 
-def check(event, context, user=""):
-    """user: the signed-in developer for API calls; empty for direct invokes, whose payload cannot vouch for anyone."""
+def check(event, context, user="", user_source=""):
+    """user_source: "token" (verified by the API's JWT authorizer) or "caller" (reported by an IAM caller such as LiteLLM)."""
     dry_run = bool(event.get("dry_run"))
     lang = guard_core.lang_of(event.get("lang"))
     policy = guard_core.normalize_policy(event["policy"], lang) if dry_run and "policy" in event else current_policy()
@@ -136,6 +140,7 @@ def check(event, context, user=""):
             "decision": out["decision"],
             "client": event.get("client", ""),
             "user": user,
+            "user_source": user_source,
             "sources": ",".join(r["source"] for r in out["results"]),
             "categories": _categories(out),
             "basis": out["basis"] or "",

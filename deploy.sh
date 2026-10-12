@@ -57,6 +57,10 @@ CALLER="$(aws sts get-caller-identity --query Arn --output text)"
 ok "AWS account $ACCOUNT, region $AWS_REGION ($CALLER)"
 IT="${IT:-$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["context"]["instanceType"])' "$ROOT/cdk/cdk.json")}"
 
+NETWORK="${NETWORK:-$(out Network)}"
+NETWORK="${NETWORK:-nat}"
+[[ "$NETWORK" =~ ^(nat|public)$ ]] || die "--network must be nat or public"
+
 STACK_EXISTS=""
 aws cloudformation describe-stacks --stack-name "$STACK" >/dev/null 2>&1 && STACK_EXISTS=1
 PROBLEMS=0
@@ -97,6 +101,26 @@ else
   PROBLEMS=$((PROBLEMS + 1))
 fi
 
+# network=nat: the NAT Gateway needs one Elastic IP (default quota: 5 per region).
+if [ "$NETWORK" = nat ]; then
+  HAVE_EIP=0
+  [ -n "$STACK_EXISTS" ] && HAVE_EIP="$(aws cloudformation list-stack-resources --stack-name "$STACK" --query "length(StackResourceSummaries[?ResourceType=='AWS::EC2::EIP' && ResourceStatus!='DELETE_COMPLETE'])" --output text)"
+  if [ "$HAVE_EIP" -gt 0 ]; then
+    ok "Elastic IP: the stack already has its NAT address"
+  else
+    EIPS="$(aws ec2 describe-addresses --query 'length(Addresses)' --output text 2>/dev/null || echo "?")"
+    EIP_QUOTA="$(aws service-quotas get-service-quota --service-code ec2 --quota-code L-0263D0A3 --query 'Quota.Value' --output text 2>/dev/null || echo 5)"
+    if [ "$EIPS" = "?" ]; then
+      warn "could not count Elastic IPs; the NAT Gateway needs one free (quota $EIP_QUOTA)"
+    elif python3 -c "import sys; sys.exit(0 if $EIPS < float('$EIP_QUOTA') else 1)"; then
+      ok "Elastic IP: $EIPS of ${EIP_QUOTA%.*} used, the NAT Gateway takes 1"
+    else
+      fail "Elastic IPs: $EIPS of ${EIP_QUOTA%.*} used, the NAT Gateway needs 1 more. Release an unused one, request an increase (Service Quotas > EC2 > 'EC2-VPC Elastic IPs'), or deploy with --network public"
+      PROBLEMS=$((PROBLEMS + 1))
+    fi
+  fi
+fi
+
 [ "$PROBLEMS" -eq 0 ] || die "$PROBLEMS preflight check(s) failed; nothing was deployed"
 [ -n "$ONLY_CHECK" ] && { echo; echo "Preflight passed."; exit 0; }
 
@@ -106,7 +130,8 @@ ${B}About to deploy stack $STACK${N}
   account   $ACCOUNT
   region    $AWS_REGION
   GPU host  $IT  (billed per hour while running; pause with ./ctl.sh stop)
-  creates   VPC (no NAT), EC2 + 100 GB gp3, guard Lambda, versioned policy bucket, CloudWatch logs$( [ "$CONSOLE" = true ] && printf '\n            policy console: S3 + CloudFront, Cognito login, HTTP API + admin Lambda' )
+  network   $NETWORK  ($( [ "$NETWORK" = nat ] && echo 'GPU host in a private subnet, no public IP, 1 NAT Gateway ~$43/month' || echo 'GPU host in a public subnet with a public IP, no NAT'))
+  creates   VPC, EC2 + 100 GB gp3, guard Lambda, versioned policy bucket, CloudWatch logs$( [ "$CONSOLE" = true ] && printf '\n            policy console: S3 + CloudFront, Cognito login, HTTP API + admin Lambda, developer sign-in' )
 EOF
 if [ -z "$YES" ]; then read -r -p "Continue? [y/N] " a; [ "$a" = y ] || [ "$a" = Y ] || exit 1; fi
 
@@ -121,8 +146,6 @@ if [ -z "$SCHEDULE" ]; then
   PREV="$(out Schedule)"; [ -n "$PREV" ] && [ "$PREV" != "always on" ] && SCHEDULE="${PREV% (UTC*}" && UTC_OFFSET="$(echo "$PREV" | sed -E 's/.*\(UTC\+?(-?[0-9.]+)\)/\1/')"
 fi
 [ -n "$SCHEDULE" ] && [ "$SCHEDULE" != none ] && CTX+=(-c schedule="$SCHEDULE" -c scheduleUtcOffset="$UTC_OFFSET")
-NETWORK="${NETWORK:-$(out Network)}"
-NETWORK="${NETWORK:-nat}"
 CTX+=(-c network="$NETWORK")
 MARKET="${MARKET:-$(out Market)}"
 [ "$MARKET" = spot ] && CTX+=(-c spot=true)
