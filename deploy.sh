@@ -10,6 +10,8 @@
 #   --schedule S          run the GPU host only in this window, e.g. "MON-FRI 08:00-20:00" (local time, see --utc-offset);
 #                         outside it the guard checks with regexes only. "none" removes it. Kept across redeploys.
 #   --utc-offset N        time zone of --schedule (default 9 = KST)
+#   --network nat|public  nat (default): GPU host in a private subnet behind a NAT Gateway (~$47/month);
+#                         public: host in a public subnet with a public IP, no NAT (cheaper demo setup). Kept across redeploys.
 #   --spot / --on-demand  run the GPU host on Spot (~50% cheaper, can be interrupted; regexes keep checking meanwhile)
 #                         or on-demand. Switching replaces the host (the model is downloaded again). Kept across redeploys.
 #   --install-client      also install the hooks on this machine; passes through
@@ -19,7 +21,7 @@
 set -euo pipefail
 source "$(dirname "$0")/scripts/lib.sh"
 
-PROFILE="" REGION="" IT="" YES="" INSTALL="" ADMIN_EMAIL="" CONSOLE=true ONLY_CHECK="" SCHEDULE="" UTC_OFFSET=9 MARKET="" CLIENT_ARGS=()
+PROFILE="" REGION="" IT="" YES="" INSTALL="" ADMIN_EMAIL="" CONSOLE=true ONLY_CHECK="" SCHEDULE="" UTC_OFFSET=9 MARKET="" NETWORK="" CLIENT_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --profile) PROFILE="$2"; shift ;;
@@ -29,6 +31,7 @@ while [ $# -gt 0 ]; do
     --no-console) CONSOLE=false ;;
     --schedule) SCHEDULE="$2"; shift ;;
     --utc-offset) UTC_OFFSET="$2"; shift ;;
+    --network) NETWORK="$2"; shift ;;
     --spot) MARKET=spot ;;
     --on-demand) MARKET=on-demand ;;
     --preflight-only) ONLY_CHECK=1 ;;
@@ -36,7 +39,7 @@ while [ $# -gt 0 ]; do
     --install-client) INSTALL=1 ;;
     --agents|--bedrock-region|--language) CLIENT_ARGS+=("$1" "$2"); shift ;;
     --claude-bedrock|--fail-open) CLIENT_ARGS+=("$1") ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     *) die "unknown option: $1 (see ./deploy.sh --help)" ;;
   esac
   shift
@@ -118,6 +121,9 @@ if [ -z "$SCHEDULE" ]; then
   PREV="$(out Schedule)"; [ -n "$PREV" ] && [ "$PREV" != "always on" ] && SCHEDULE="${PREV% (UTC*}" && UTC_OFFSET="$(echo "$PREV" | sed -E 's/.*\(UTC\+?(-?[0-9.]+)\)/\1/')"
 fi
 [ -n "$SCHEDULE" ] && [ "$SCHEDULE" != none ] && CTX+=(-c schedule="$SCHEDULE" -c scheduleUtcOffset="$UTC_OFFSET")
+NETWORK="${NETWORK:-$(out Network)}"
+NETWORK="${NETWORK:-nat}"
+CTX+=(-c network="$NETWORK")
 MARKET="${MARKET:-$(out Market)}"
 [ "$MARKET" = spot ] && CTX+=(-c spot=true)
 # Keep a running GPU host: reuse its AMI instead of the newest DLAMI, which would replace the instance.
@@ -144,11 +150,19 @@ done
 
 step "Smoke test"
 invoke_guard '{"text": "warm up"}' >/dev/null
-for t in "Customer John Smith, SSN 123-45-6789, lives at 42 Elm St" "주민등록번호 900101-1234567 고객 조회" \
-         "Patient Maria Garcia was diagnosed with HIV in 2021" "Show me an S3 bucket policy for cross-account access"; do
+# Texts come from the synthetic demo data, so this script holds no PII-like literals (the guard hook scans scripts too).
+while IFS= read -r t; do
   D="$(invoke_guard "$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$t")" | python3 -c 'import json,sys; r=json.load(sys.stdin); print("%-5s %7.1f ms" % (r["decision"], r["results"][0]["latency_ms"]))')"
-  echo "  $D  <- $t"
-done
+  echo "  $D  <- ${t:0:60}"
+done < <(python3 - "$ROOT" <<'PY'
+import sys, os
+root = sys.argv[1]
+print(open(os.path.join(root, "demo", "en", "customers.csv")).read().splitlines()[1])
+print(open(os.path.join(root, "demo", "ko", "customers.csv")).read().splitlines()[1])
+print(open(os.path.join(root, "demo", "en", "support_ticket.txt")).read().replace("\n", " ").strip())
+print("Show me an S3 bucket policy for cross-account access")
+PY
+)
 
 if [ "$CONSOLE" = true ]; then
   step "Policy console"

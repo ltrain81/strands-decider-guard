@@ -14,7 +14,8 @@ from collections import defaultdict
 HERE = os.path.dirname(os.path.abspath(__file__))
 RES = os.path.join(HERE, "results")
 PRICE_PII, PRICE_TOPIC = 0.10 / 1000, 0.15 / 1000          # Seoul list prices per text unit (AWS Pricing API, 2026-10-12)
-GPU_HOURLY, EBS_MONTHLY, IPV4_MONTHLY = 0.9896, 9.12, 3.65    # g6.xlarge on-demand Seoul, 100 GB gp3, one public IPv4
+GPU_HOURLY, EBS_MONTHLY = 0.9896, 9.12        # g6.xlarge on-demand Seoul, 100 GB gp3
+NAT_MONTHLY = 0.059 * 730                       # one NAT Gateway (default network 'nat'), runs 24/7; traffic after first boot is negligible
 PII_SETS = ["ai4privacy", "gretel_finance", "nemotron", "kpii_bench", "ko_synth", "private_life", "dev_public", "dev_synth"]
 
 
@@ -157,8 +158,8 @@ def main():
         ("g6.xlarge Spot, weekdays 08-20", 0.47, HOURS_SCHED, 3.5, "--spot --schedule"),
         ("g4dn.xlarge (T4) on-demand, weekdays 08-20", 0.647, HOURS_SCHED, 1.0, "~3x slower: 0.8-1.0 s per check"),
     ]
-    def host_cost(rate, hours):
-        return rate * hours + EBS_MONTHLY + IPV4_MONTHLY * hours / 730   # the auto-assigned public IP is released while stopped
+    def host_cost(rate, hours, hosts=1):
+        return (rate * hours + EBS_MONTHLY) * hosts + NAT_MONTHLY   # one NAT Gateway per deployment, shared by the hosts
     md += ["### GPU host options", "",
            "Measured on probe instances: g4dn.xlarge (T4) 0.78 s per short check and ~1 check/s; g6f fractional-GPU types ran on CPU "
            "with the GPU image (they need NVIDIA GRID drivers) at ~7 s per check, which also rules out CPU-only instances for interactive hooks.", "",
@@ -172,14 +173,14 @@ def main():
         row = [f"{devs} devs × {per_day}/day, {chars} chars", f"{checks:,}", f"${u * PRICE_PII:,.0f}", f"${u * (PRICE_PII + PRICE_TOPIC):,.0f}"]
         for n, r, h, c, note in (options[0], options[1], options[4], options[5]):
             hosts = max(1, math.ceil(load_avg * 3 / c))   # peak ~3x the average
-            row.append(f"${host_cost(r, h) * hosts:,.0f} ({hosts})")
+            row.append(f"${host_cost(r, h, hosts):,.0f} ({hosts})")
         rows.append(row)
     md += ["### Monthly cost by team size (number of GPU hosts in brackets)", "",
            table(["scenario", "checks/month", "Guardrails PII", "Guardrails PII + topics", "decider 24/7", "decider weekdays 08-20",
                   "decider Spot weekdays 08-20", "decider g4dn weekdays 08-20"], rows), "",
            "Guardrails has no idle cost and is cheapest for small teams; the decider's cost is flat per host, so it wins as volume or "
-           "text length grows, and the schedule + Spot options cut it by about 80 % against on-demand 24/7. Lambda, S3, CloudWatch and "
-           "the console add cents at these volumes.", ""]
+           "text length grows, and the schedule + Spot options cut it by about 75 % against on-demand 24/7. Host costs include 100 GB of EBS and the "
+           "NAT Gateway (~$43/month; `--network public` drops it). Lambda, S3, CloudWatch and the console add cents at these volumes.", ""]
     with open(os.path.join(HERE, "COMPARISON.md"), "w") as f:
         f.write("\n".join(md))
     print("\n".join(md))

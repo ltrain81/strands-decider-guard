@@ -109,20 +109,20 @@ Measured on probe instances: g4dn.xlarge (T4) 0.78 s per short check and ~1 chec
 
 | option | $/month (1 host) | checks/s per host | note |
 |---|---|---|---|
-| g6.xlarge on-demand, 24/7 | $735 | 3.5 | current default |
-| g6.xlarge on-demand, weekdays 08-20 | $268 | 3.5 | --schedule; regex-only outside the window |
-| g6.xlarge 1-yr reserved (no upfront), 24/7 | $483 | 3.5 | commitment; billed even when stopped |
-| g6.xlarge Spot, 24/7 | $356 | 3.5 | --spot; interruptions fall back to regex-only |
-| g6.xlarge Spot, weekdays 08-20 | $133 | 3.5 | --spot --schedule |
-| g4dn.xlarge (T4) on-demand, weekdays 08-20 | $179 | 1.0 | ~3x slower: 0.8-1.0 s per check |
+| g6.xlarge on-demand, 24/7 | $775 | 3.5 | current default |
+| g6.xlarge on-demand, weekdays 08-20 | $310 | 3.5 | --schedule; regex-only outside the window |
+| g6.xlarge 1-yr reserved (no upfront), 24/7 | $522 | 3.5 | commitment; billed even when stopped |
+| g6.xlarge Spot, 24/7 | $395 | 3.5 | --spot; interruptions fall back to regex-only |
+| g6.xlarge Spot, weekdays 08-20 | $175 | 3.5 | --spot --schedule |
+| g4dn.xlarge (T4) on-demand, weekdays 08-20 | $221 | 1.0 | ~3x slower: 0.8-1.0 s per check |
 
 ### Monthly cost by team size (number of GPU hosts in brackets)
 
 | scenario | checks/month | Guardrails PII | Guardrails PII + topics | decider 24/7 | decider weekdays 08-20 | decider Spot weekdays 08-20 | decider g4dn weekdays 08-20 |
 |---|---|---|---|---|---|---|---|
-| 10 devs × 200/day, 1500 chars | 44,000 | $9 | $22 | $735 (1) | $268 (1) | $133 (1) | $179 (1) |
-| 50 devs × 300/day, 2000 chars | 330,000 | $66 | $165 | $735 (1) | $268 (1) | $133 (1) | $358 (2) |
-| 200 devs × 300/day, 2000 chars | 1,320,000 | $264 | $660 | $1,470 (2) | $536 (2) | $266 (2) | $895 (5) |
-| 500 devs × 400/day, 3000 chars | 4,400,000 | $1,320 | $3,300 | $3,676 (5) | $1,341 (5) | $664 (5) | $2,684 (15) |
+| 10 devs × 200/day, 1500 chars | 44,000 | $9 | $22 | $775 (1) | $310 (1) | $175 (1) | $221 (1) |
+| 50 devs × 300/day, 2000 chars | 330,000 | $66 | $165 | $775 (1) | $310 (1) | $175 (1) | $398 (2) |
+| 200 devs × 300/day, 2000 chars | 1,320,000 | $264 | $660 | $1,506 (2) | $577 (2) | $306 (2) | $931 (5) |
+| 500 devs × 400/day, 3000 chars | 4,400,000 | $1,320 | $3,300 | $3,701 (5) | $1,377 (5) | $701 (5) | $2,707 (15) |
 
-Guardrails has no idle cost and is cheapest for small teams; the decider's cost is flat per host, so it wins as volume or text length grows, and the schedule + Spot options cut it by about 80 % against on-demand 24/7. Lambda, S3, CloudWatch and the console add cents at these volumes.
+Guardrails has no idle cost and is cheapest for small teams; the decider's cost is flat per host, so it wins as volume or text length grows, and the schedule + Spot options cut it by about 75 % against on-demand 24/7. Host costs include 100 GB of EBS and the NAT Gateway (~$43/month; `--network public` drops it). Lambda, S3, CloudWatch and the console add cents at these volumes.

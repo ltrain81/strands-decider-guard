@@ -27,14 +27,20 @@ export class DeciderGuardStack extends cdk.Stack {
     const modelId = ctx('modelId');
     const deciderRef = ctx('deciderRef');
 
-    // No NAT: the decider host sits in a public subnet with no inbound rules except from the guard Lambda,
-    // and the Lambda sits in isolated subnets and only talks to the host's private IP.
+    // network=nat (default): the decider host sits in a private subnet with no public IP; it reaches PyPI, GitHub and
+    //   Hugging Face (first boot) and SSM through one NAT Gateway. network=public: the host sits in a public subnet with
+    //   a public IP and no NAT (cheaper, for demos). Either way the only inbound rule is the guard Lambda on port 8000,
+    //   and the Lambda sits in isolated subnets talking to the host's private IP. The private group is appended last so
+    //   switching modes keeps the existing subnets' CIDRs.
+    const network = (this.node.tryGetContext('network') as string | undefined) ?? 'nat';
+    if (!['nat', 'public'].includes(network)) throw new Error(`network must be nat or public, got ${network}`);
     const vpc = new ec2.Vpc(this, 'Vpc', {
       maxAzs: 2,
-      natGateways: 0,
+      natGateways: network === 'nat' ? 1 : 0,
       subnetConfiguration: [
         { name: 'public', subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
         { name: 'isolated', subnetType: ec2.SubnetType.PRIVATE_ISOLATED, cidrMask: 24 },
+        ...(network === 'nat' ? [{ name: 'private', subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS, cidrMask: 24 }] : []),
       ],
     });
 
@@ -92,7 +98,7 @@ export class DeciderGuardStack extends cdk.Stack {
     const spot = ['true', true].includes(this.node.tryGetContext('spot'));
     const host = new ec2.Instance(this, 'DeciderHost', {
       vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      vpcSubnets: { subnetType: network === 'nat' ? ec2.SubnetType.PRIVATE_WITH_EGRESS : ec2.SubnetType.PUBLIC },
       instanceType: new ec2.InstanceType(instanceType),
       // deploy.sh pins the running host's AMI (-c amiId=...) so a newer DLAMI release does not replace it on redeploy.
       machineImage: ctx('amiId')
@@ -102,7 +108,7 @@ export class DeciderGuardStack extends cdk.Stack {
       role,
       userData,
       requireImdsv2: !spot,   // with Spot, IMDSv2 is set on the launch template below
-      associatePublicIpAddress: true,
+      associatePublicIpAddress: network === 'public',
       blockDevices: [{ deviceName: '/dev/sda1', volume: ec2.BlockDeviceVolume.ebs(100, { volumeType: ec2.EbsDeviceVolumeType.GP3, encrypted: true }) }],
     });
     cdk.Tags.of(host).add('Name', `${this.stackName}-decider`);
@@ -153,6 +159,7 @@ export class DeciderGuardStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'DeciderInstanceId', { value: host.instanceId });
     new cdk.CfnOutput(this, 'Region', { value: this.region });
     new cdk.CfnOutput(this, 'Market', { value: spot ? 'spot' : 'on-demand' });
+    new cdk.CfnOutput(this, 'Network', { value: network });
     new cdk.CfnOutput(this, 'EvidenceBucketName', { value: evidenceBucket.bucketName });
   }
 

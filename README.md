@@ -47,10 +47,14 @@ More detail: [Configuration reference](docs/CONFIGURATION.md) · [Policy console
 4. It logs only the decision, types and sizes, never the text.
 5. Only what passed reaches the model.
 
+The GPU host sits in a private subnet with no public IP. It reaches the internet only through a NAT Gateway, to install packages and
+download the model on first boot and to talk to SSM. The guard Lambda runs in isolated subnets with no internet route at all.
+`./deploy.sh --network public` puts the host in a public subnet instead (no NAT cost; its security group still accepts only the guard).
+
 Admins:
 - Ⓐ open the console (CloudFront, Cognito sign-in),
-- Ⓑ save policy versions to S3,
-- Ⓒ see stats computed from the decision log.
+- Ⓑ save policy versions to S3 and, if enabled, view kept original text,
+- see stats and alerts from the decision log and CloudWatch (EventBridge runs a health check every 5 minutes and the optional host schedule).
 
 The diagram source is [`docs/images/architecture.drawio`](docs/images/architecture.drawio); open it in
 [draw.io](https://app.diagrams.net), which includes the AWS icons.
@@ -185,10 +189,11 @@ make destroy                   # delete everything (asks you to type the stack n
 
 | Item | Approximate cost |
 |---|---|
-| GPU host `g6.xlarge` (NVIDIA L4), on-demand 24/7 | ~$735/month in ap-northeast-2 (~$600 in us-east-1) |
-| … only weekdays 08–20 (`SCHEDULE="MON-FRI 08:00-20:00"`) | ~$268/month |
-| … on Spot (`DEPLOY_ARGS=--spot`) + weekdays 08–20 | ~$133/month |
-| EBS gp3 100 GB | ~$9/month, also billed while the host is stopped |
+| GPU host `g6.xlarge` (NVIDIA L4), on-demand 24/7 | ~$731/month in ap-northeast-2 (~$600 in us-east-1) |
+| … only weekdays 08–20 (`SCHEDULE="MON-FRI 08:00-20:00"`) | ~$267/month |
+| … on Spot (`DEPLOY_ARGS=--spot`) + weekdays 08–20 | ~$131/month |
+| EBS gp3 100 GB | ~$9/month, included above; also billed while the host is stopped |
+| NAT Gateway (default `--network nat`) | ~$43/month, runs 24/7; `--network public` removes it |
 | Lambda, API Gateway, CloudFront, Cognito, S3, CloudWatch | near zero at team scale |
 
 - Outside the schedule, during a Spot interruption, or after `make stop`, the guard **falls back to regex-only checks** and keeps working.
@@ -258,7 +263,7 @@ questions only, which is closest to what developers feel.
   (`-c evidenceDays=N`), readable only by console admins, and every view is recorded. Turning it on means that bucket holds the very
   data you are trying to protect, so decide with your privacy officer.
 - Long inputs are sampled: up to 16 chunks of 1,500 characters. The regexes still scan the whole text (up to 256 KB per file).
-- The decider server has no authentication. Only the guard Lambda's security group can reach it. Its behaviour
+- The decider server has no authentication. It has no public IP (default network) and only the guard Lambda's security group can reach it. Its behaviour
   under concurrent requests is not documented upstream.
 - The model is English-first. Korean text and Korean rules worked in our tests; check other languages before relying on them.
 

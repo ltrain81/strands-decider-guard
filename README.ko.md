@@ -52,10 +52,14 @@ UserPromptSubmit operation blocked by hook:
 4. 판정, 유형, 크기만 로그로 남기고 원문은 남기지 않습니다.
 5. 통과한 것만 모델로 갑니다.
 
+GPU 호스트는 공인 IP 없이 프라이빗 서브넷에 있습니다. 첫 부팅 때 패키지 설치·모델 다운로드와 SSM 통신만 NAT Gateway 를 거쳐 인터넷으로 나갑니다.
+guard Lambda 는 인터넷 경로가 전혀 없는 격리 서브넷에서 실행됩니다.
+`./deploy.sh --network public` 을 쓰면 호스트를 퍼블릭 서브넷에 둡니다 (NAT 비용 없음, 보안 그룹은 여전히 guard 만 허용).
+
 관리자는:
 - Ⓐ 콘솔을 엽니다 (CloudFront, Cognito 로그인).
-- Ⓑ 정책 버전을 S3 에 저장합니다.
-- Ⓒ 판정 로그로 만든 통계를 봅니다.
+- Ⓑ 정책 버전을 S3 에 저장하고, 켜 두었다면 보관된 원문을 봅니다.
+- 판정 로그와 CloudWatch 로 통계와 알림을 봅니다 (EventBridge 가 5분마다 상태를 점검하고, 선택한 호스트 스케줄을 실행합니다).
 
 다이어그램 원본은 [`docs/images/architecture.drawio`](docs/images/architecture.drawio) 입니다.
 AWS 아이콘이 들어 있는 [draw.io](https://app.diagrams.net) 에서 열어 편집하면 됩니다.
@@ -198,10 +202,11 @@ make destroy                   # 전체 삭제 (스택 이름을 입력해 확�
 
 | 항목 | 대략적인 비용 |
 |---|---|
-| GPU 호스트 `g6.xlarge` (NVIDIA L4), 온디맨드 24시간 | ap-northeast-2 월 약 $735 (us-east-1 약 $600) |
-| … 평일 08–20시만 (`SCHEDULE="MON-FRI 08:00-20:00"`) | 월 약 $268 |
-| … Spot (`DEPLOY_ARGS=--spot`) + 평일 08–20시 | 월 약 $133 |
-| EBS gp3 100GB | 월 약 $9, 호스트를 정지해도 과금 |
+| GPU 호스트 `g6.xlarge` (NVIDIA L4), 온디맨드 24시간 | ap-northeast-2 월 약 $731 (us-east-1 약 $600) |
+| … 평일 08–20시만 (`SCHEDULE="MON-FRI 08:00-20:00"`) | 월 약 $267 |
+| … Spot (`DEPLOY_ARGS=--spot`) + 평일 08–20시 | 월 약 $131 |
+| EBS gp3 100GB | 월 약 $9 (위 금액에 포함), 호스트를 정지해도 과금 |
+| NAT Gateway (기본 `--network nat`) | 월 약 $43, 24시간 과금. `--network public` 이면 없음 |
 | Lambda, API Gateway, CloudFront, Cognito, S3, CloudWatch | 팀 규모에서는 거의 0 |
 
 - 운영 시간 외, Spot 중단 중, `make stop` 상태에서는 guard 가 **정규식만으로 검사하며 계속 동작**합니다.
@@ -273,7 +278,7 @@ make destroy                   # 전체 삭제 (스택 이름을 입력해 확�
   - 원문은 암호화된 S3 에 저장되고 30일 뒤 삭제되며(`-c evidenceDays=N`), 콘솔 관리자만 볼 수 있고, 열람할 때마다 기록이 남습니다.
   - 켜면 그 버킷이 바로 보호하려는 데이터를 담게 되므로, 개인정보 담당자와 상의해서 정하세요.
 - 긴 입력은 1,500자 청크 최대 16개를 샘플링합니다. 정규식은 전체를 봅니다 (파일당 최대 256KB).
-- decider 서버는 인증이 없어서 guard Lambda 보안 그룹에서만 접근할 수 있게 막았습니다. 동시 요청 처리 특성은 upstream 에도 문서화되어 있지 않습니다.
+- decider 서버는 인증이 없어서 공인 IP 없이(기본 네트워크) 두고 guard Lambda 보안 그룹에서만 접근할 수 있게 막았습니다. 동시 요청 처리 특성은 upstream 에도 문서화되어 있지 않습니다.
 - 모델은 영어 중심입니다. 한국어 텍스트와 한국어 규칙은 테스트에서 동작했지만, 다른 언어는 확인한 뒤 쓰세요.
 
 ## 문제 해결

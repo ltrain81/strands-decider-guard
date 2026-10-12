@@ -109,7 +109,7 @@ connection failure the model is skipped for 30 s, so a stopped host costs ~1.5 s
 ## AWS deployment
 
 `./deploy.sh` flags: `--region`, `--profile`, `--instance-type`, `--admin-email`, `--no-console`, `--schedule`, `--utc-offset`,
-`--spot` / `--on-demand`, `--preflight-only`,
+`--spot` / `--on-demand`, `--network nat|public`, `--preflight-only`,
 `-y`, and `--install-client`. `--install-client` passes `--agents`, `--claude-bedrock`, `--bedrock-region`,
 `--fail-open` and `--language` through to `install.sh`.
 
@@ -125,6 +125,7 @@ The CDK context lives in `cdk/cdk.json`. Override a value with `-c key=value` in
 | `amiId` | — | Set automatically on redeploys so a newer GPU AMI does not replace the running host |
 | `schedule`, `scheduleUtcOffset` | — , `9` | run the host only in this window, e.g. `MON-FRI 08:00-20:00` (`./deploy.sh --schedule … --utc-offset 9`); kept across redeploys, `--schedule none` removes it |
 | `evidenceDays` | `30` | days before kept original text is deleted (evidence bucket lifecycle rule) |
+| `network` | `nat` | `nat`: GPU host in a private subnet with no public IP, internet through one NAT Gateway (~$43/month in Seoul). `public`: host in a public subnet with a public IP and no NAT (the security group still admits only the guard). `--network`; kept across redeploys; switching replaces the host |
 | `spot` | `false` | run the host on Spot, a persistent request that stops on interruption (`--spot` / `--on-demand`; switching replaces the host) |
 
 Guard Lambda environment:
