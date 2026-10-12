@@ -63,7 +63,7 @@ AWS 자격 증명을 나눠 주는 방식과 비교하면:
    (`bash -c "$(curl -fsSL <콘솔 주소>/dev/install.sh)"`)이 콘솔 사이트에서 hook 을 내려받으므로 저장소가 필요 없습니다.
    또는 설치 명령을 직접 줍니다. `outputs.json` 에는 비밀 값이 없어서 공유해도 됩니다. 아니면 값을 직접 넘깁니다:
    ```bash
-   client/install.sh --outputs outputs.json --auth jwt
+   client/install.sh --outputs outputs.json
    # 또는
    client/install.sh --api-url <GuardApiUrl> --client-id <DevClientId> \
      --authorize-url <DevAuthorizeUrl> --token-url <DevTokenUrl>       # 외부 IdP: --issuer <DevIssuer>
@@ -76,7 +76,7 @@ AWS 자격 증명을 나눠 주는 방식과 비교하면:
 ## 개발자: 설치와 로그인
 
 ```bash
-client/install.sh --outputs outputs.json --auth jwt     # 브라우저로 로그인한 뒤 스모크 테스트
+client/install.sh --outputs outputs.json     # 브라우저로 로그인한 뒤 스모크 테스트
 decider-guard status                                    # API 를 통한 guard 상태
 decider-guard login                                     # 세션 만료 시 (기본 30일)
 decider-guard login --no-browser                        # SSH 환경: 출력된 URL 을 다른 곳에서 열고, 도착한 주소를 붙여 넣기

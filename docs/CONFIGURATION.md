@@ -18,7 +18,7 @@ the detection policy is edited in the [policy console](ADMIN.md). This page list
 
 | Key | Default | Meaning |
 |---|---|---|
-| `backend` | `lambda` | `lambda`: call the deployed guard with AWS credentials (IAM). `api`: call it through the sign-in API with a token from `decider-guard login` ([developer sign-in](SIGN_IN.md)). `local`: run the engine in-process against a local decider |
+| `backend` | set by `install.sh`: `api` from a deployment, `lambda` with `--auth iam`, `local` with `--local` | `api`: call the guard through the sign-in API with a token from `decider-guard login` ([developer sign-in](SIGN_IN.md)). `lambda`: invoke it with AWS credentials (IAM mode). `local`: run the engine in-process against a local decider |
 | `api_url`, `auth` | from `outputs.json` | backend `api`: the `GuardApiUrl` endpoint, and `auth.client_id` plus `auth.issuer` (OIDC discovery) or `auth.authorize_url` + `auth.token_url` |
 | `function_name`, `region`, `profile` | from `outputs.json` | Guard Lambda and the AWS profile used to call it (default credential chain if `profile` is empty) |
 | `decider_url` | `http://127.0.0.1:8000` | Local mode only |
@@ -35,7 +35,7 @@ the detection policy is edited in the [policy console](ADMIN.md). This page list
 | `--function-name N --region R` | Same, by hand |
 | `--auth jwt\|iam` | With `--outputs` the default is `jwt` (backend `api`: browser sign-in, no AWS credentials; runs `decider-guard login` before the smoke test). `iam` uses the developer's AWS credentials instead ([IAM mode](SIGN_IN.md#iam-mode-advanced)) |
 | `--api-url U --client-id C --issuer I` | Same, by hand (or `--authorize-url` + `--token-url` instead of `--issuer`). This is what you hand to developers without `outputs.json` |
-| `--no-login` | With `--auth jwt`: skip the sign-in and the smoke test |
+| `--no-login` | Sign-in mode: skip the sign-in and the smoke test |
 | `--local [--decider-url URL]` | Local backend; needs a running decider (`scripts/local-decider.sh start`) |
 | `--agents claude,codex` | Which agents to configure (default `claude,codex`; add `kiro` to opt in — it can block tool calls but not prompts). `--uninstall` removes all three |
 | `--profile P` | AWS profile for calling the guard |
@@ -209,8 +209,9 @@ with your device-management tool:
 ```
 
 - Install `decider_guard.py`, `guard_core.py`, a venv with boto3 and a `config.json` under `/opt/decider-guard`.
-  `sudo DECIDER_GUARD_HOME=/opt/decider-guard client/install.sh --outputs outputs.json --agents none` does that
-  without touching any user's agent config.
+  `sudo DECIDER_GUARD_HOME=/opt/decider-guard client/install.sh --outputs outputs.json --agents none --no-login` does that
+  without touching any user's agent config. Each person then runs `/opt/decider-guard/bin/decider-guard login` once; their
+  token goes to their own `~/.decider-guard/token.json`, never the shared folder.
 - For model traffic users cannot route around, use the [LiteLLM guardrail](LITELLM.md) or Bedrock Guardrails.
 
 ## IAM permissions
@@ -232,4 +233,6 @@ with your device-management tool:
 | `~/.kiro/hooks/decider-guard.json` | global Kiro hooks |
 | `~/.codex/hooks.json` | two hook entries (backed up) |
 | `~/.strands-decider/` | local decider venv, model cache, server log (`make local`) |
-| `outputs.json` | deployment outputs (names and ARNs, no secrets) |
+| `~/.decider-guard/bin/decider-guard` | `login`, `logout`, `status`, `check` (linked into `~/.local/bin` when it exists) |
+| `~/.decider-guard/macos-roots.pem` | macOS only, when Python has no CA certificates: the system roots, refreshed weekly |
+| `outputs.json` | deployment outputs (names, ARNs and URLs, no secrets) |

@@ -100,6 +100,6 @@ Findings (2026-10-12, holdout half, after the recall tuning in [TUNING.md](TUNIN
   through NAME, at the cost above.
 - **Company rules:** decider custom rules F1 94 vs Guardrails denied topics 66 (denied topics fired on half the hard negatives).
 - **Latency:** Guardrails p50 140 ms vs 243 ms for the decider Lambda round trip.
-- **Cost:** see COMPARISON.md; Guardrails is cheapest for small teams, a scheduled Spot GPU host (~$133/month) wins as volume grows.
+- **Cost:** see COMPARISON.md; Guardrails is cheapest for small teams, a scheduled Spot GPU host (~$175/month including the NAT Gateway) wins as volume grows.
 - Practical combination: Guardrails PII (identifiers only) as the server-side backstop, the decider for context, Korean, company rules and
   low false positives on code.

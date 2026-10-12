@@ -134,7 +134,8 @@ When "You have unsaved changes" appears at the bottom, click **Save and apply**.
   - Filter by period, decision, tool, information type (or custom rule) and target. The target is a file name, `prompt`, `bash` and so on.
   - Click a row for its details, including the request ID for CloudWatch.
   - **Export CSV** downloads what is on screen.
-  - **No text is stored anywhere:** the log holds the decision, tool, target, types, size and latency.
+  - **No text in the log:** it holds the decision, tool, target, types, size, latency and, for signed-in hooks, the person and
+    their groups. Text is kept only when *Keep original text* is on, and then outside the log.
 - **Admin activity:** who saved the policy or changed alerts, and exactly what changed.
   For example "Sensitivity: Balanced → Strict" or "Rule added: Project Atlas".
 - On AWS this reads CloudWatch Logs, which can take a few seconds for long periods.
@@ -143,7 +144,7 @@ When "You have unsaved changes" appears at the bottom, click **Save and apply**.
 
 ![Developers tab: invitations, install command, sign-ins and groups](images/console-users-en.png)
 
-AWS only, for hooks installed with sign-in (`--auth jwt`). See [developer sign-in](SIGN_IN.md) for how it works.
+AWS only, for hooks that sign in (the default). See [developer sign-in](SIGN_IN.md) for how it works.
 
 - **Invite:** paste email addresses (commas or new lines), optionally pick groups, and click **Send invitations**.
   - AWS emails each person a temporary password and a link to the install page.

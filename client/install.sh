@@ -114,7 +114,7 @@ python3 "$HERE/configure_agents.py" "${ARGS[@]}"
 
 # `decider-guard login | logout | status | check TEXT`, linked into ~/.local/bin when that exists.
 mkdir -p "$DEST/bin"
-printf '#!/bin/sh\nexec "%s" "%s" "$@"\n' "$PY" "$DEST/decider_guard.py" > "$DEST/bin/decider-guard"
+printf '#!/bin/sh\nDECIDER_GUARD_HOME="%s" exec "%s" "%s" "$@"\n' "$DEST" "$PY" "$DEST/decider_guard.py" > "$DEST/bin/decider-guard"
 chmod 755 "$DEST/bin/decider-guard"
 [ -d "$HOME/.local/bin" ] && ln -sf "$DEST/bin/decider-guard" "$HOME/.local/bin/decider-guard"
 

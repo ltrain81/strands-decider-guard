@@ -188,7 +188,17 @@ def _invoke_with_cli(cfg, payload):
 # never left this process) is exchanged for tokens. The ID token (1 h) goes to the guard API; the refresh token
 # (default 30 days) renews it silently. Both live in token.json (0600). No AWS credentials are involved.
 
-TOKEN_FILE = os.path.join(HOME, "token.json")
+def _user_dir():
+    """Per-user files (token, CA cache): HOME when it is ours, else ~/.decider-guard. A managed install keeps the hook in a
+    shared read-only folder (/opt/decider-guard), and each person's sign-in must not be shared."""
+    if os.access(HOME, os.W_OK) or not os.path.exists(HOME):
+        return HOME
+    d = os.path.expanduser("~/.decider-guard")
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    return d
+
+
+TOKEN_FILE = os.path.join(_user_dir(), "token.json")
 CALLBACK_PORT = 8723   # must match DEV_CALLBACK in cdk/lib/guard-stack.ts
 REDIRECT = f"http://localhost:{CALLBACK_PORT}/callback"
 
@@ -211,12 +221,11 @@ def ssl_context():
     bundle = next((os.environ[k] for k in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "AWS_CA_BUNDLE") if os.environ.get(k)), None)
     ctx = ssl.create_default_context(cafile=bundle)
     if not bundle and not ctx.cert_store_stats().get("x509_ca") and sys.platform == "darwin":
-        pem = os.path.join(HOME, "macos-roots.pem")
+        pem = os.path.join(_user_dir(), "macos-roots.pem")
         if not os.path.exists(pem) or time.time() - os.path.getmtime(pem) > 7 * 86400:
             r = subprocess.run(["security", "find-certificate", "-a", "-p", "/System/Library/Keychains/SystemRootCertificates.keychain",
                                 "/Library/Keychains/System.keychain"], capture_output=True, text=True, timeout=20)
             if "BEGIN CERTIFICATE" in r.stdout:
-                os.makedirs(HOME, exist_ok=True)
                 with open(pem + ".tmp", "w") as f:
                     f.write(r.stdout)
                 os.replace(pem + ".tmp", pem)

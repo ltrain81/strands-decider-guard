@@ -161,13 +161,13 @@ and needs no AWS access.
 
 From a clone of the repository instead:
 
-You need git, python3, Claude Code and/or Codex, the `outputs.json` from your admin, and the email with your temporary password.
+You need git, python3, Claude Code and/or Codex, the `outputs.json` (or the install command) from your admin, and the email with your temporary password.
 If you cannot clone the repository, your admin can send it as an archive: the installer only uses `client/` and `guard/guard_core.py`.
 
 ```bash
 git clone https://github.com/ltrain81/strands-decider-guard && cd strands-decider-guard
 cp ~/Downloads/outputs.json .                         # from your admin
-client/install.sh --outputs outputs.json --auth jwt   # opens the browser: sign in, set a new password on first sign-in
+client/install.sh --outputs outputs.json              # opens the browser: sign in, set a new password on first sign-in
 ```
 
 1. The installer signs you in, adds the hooks to `~/.claude/settings.json` and `~/.codex/hooks.json` (other hooks are kept,
@@ -254,7 +254,7 @@ make destroy                   # delete everything (asks you to type the stack n
   - Fractional-GPU and CPU-only instances take about 7 s per check.
 - Team-size cost tables, including Bedrock Guardrails, are in the comparison.
 
-`fail_mode` only matters when the hook cannot reach the guard Lambda itself (no network, no AWS credentials): `closed`, the
+`fail_mode` only matters when the hook cannot get a verdict from the guard at all (no network, signed out, or no AWS credentials in IAM mode): `closed`, the
 default, blocks; `open` allows with a warning. See [Configuration](docs/CONFIGURATION.md).
 
 ## Accuracy and latency
@@ -326,7 +326,7 @@ questions only, which is closest to what developers feel.
 | `login failed: … CERTIFICATE_VERIFY_FAILED` | This Python has no CA certificates. Re-run the installer (the hook falls back to the macOS keychain), or set `SSL_CERT_FILE`. Homebrew: `brew postinstall ca-certificates` |
 | `login failed: … Address already in use` | Port 8723 is taken, usually by another `decider-guard login`. Close it and retry |
 | Deploy fails with "The maximum number of addresses has been reached" | No free Elastic IP for the NAT Gateway: request a quota increase, or `DEPLOY_ARGS="--network public"` |
-| Every prompt is blocked with "Could not reach the guard" | The hook cannot reach the guard Lambda: check network and AWS credentials (`aws sts get-caller-identity`), then `make health`. To allow while it is down, set `fail_mode: open` in `~/.decider-guard/config.json` |
+| Every prompt is blocked with "Could not reach the guard" | The hook cannot reach the guard: run `decider-guard status` (it says whether you are signed in and whether the model is up); in IAM mode also check `aws sts get-caller-identity`. To allow while it is down, set `fail_mode: open` in `~/.decider-guard/config.json` |
 | Reasons say "model unavailable: checked with patterns only" | The GPU host is stopped (schedule, Spot interruption, `make stop`) or unhealthy: `make status`, `make start`. Local mode: `scripts/local-decider.sh start` |
 | `make deploy`: GPU quota is 0 | Service Quotas → EC2 → *Running On-Demand G and VT instances*: request at least 4 vCPUs. Or use `--instance-type` with a type you have quota for |
 | `Cannot exceed quota for RolesPerAccount` | Your account is at the IAM role limit. The stack adds 2 roles (3 with the console), and CDK bootstrap adds 5 once. Free some roles, request an increase, or use `DEPLOY_ARGS=--no-console` |

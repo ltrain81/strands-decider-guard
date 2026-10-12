@@ -165,13 +165,13 @@ cd demo/ko && claude
 
 저장소를 clone 해서 설치하려면:
 
-필요한 것: git, python3, Claude Code 또는 Codex, 관리자에게 받은 `outputs.json`, 임시 비밀번호가 담긴 메일.
+필요한 것: git, python3, Claude Code 또는 Codex, 관리자에게 받은 `outputs.json`(또는 설치 명령), 임시 비밀번호가 담긴 메일.
 저장소를 clone 할 수 없으면 관리자가 압축 파일로 전달해도 됩니다. 설치에는 `client/` 와 `guard/guard_core.py` 만 쓰입니다.
 
 ```bash
 git clone https://github.com/ltrain81/strands-decider-guard && cd strands-decider-guard
 cp ~/Downloads/outputs.json .                         # 관리자에게 받은 파일
-client/install.sh --outputs outputs.json --auth jwt   # 브라우저가 열림: 로그인, 첫 로그인 때 새 비밀번호 설정
+client/install.sh --outputs outputs.json              # 브라우저가 열림: 로그인, 첫 로그인 때 새 비밀번호 설정
 ```
 
 1. 설치 스크립트가 로그인하고, `~/.claude/settings.json` 과 `~/.codex/hooks.json` 에 hook 을 추가한 뒤
@@ -263,7 +263,7 @@ make destroy                   # 전체 삭제 (스택 이름을 입력해 확�
   - 분할 GPU와 CPU 전용 인스턴스는 검사 1건에 약 7초가 걸립니다.
 - 팀 규모별 비용표(Bedrock Guardrails 포함)는 비교 문서에 있습니다.
 
-`fail_mode` 는 hook 이 guard Lambda 자체에 닿지 못할 때(네트워크, AWS 자격 증명 문제)만 적용됩니다. 기본값 `closed` 는 막고,
+`fail_mode` 는 hook 이 guard 의 판정을 아예 받지 못할 때(네트워크, 로그인 만료, IAM 방식의 자격 증명 문제)만 적용됩니다. 기본값 `closed` 는 막고,
 `open` 은 경고와 함께 통과시킵니다. [설정 레퍼런스](docs/CONFIGURATION.md)를 보세요.
 
 ## 정확도와 지연시간
@@ -336,7 +336,7 @@ make destroy                   # 전체 삭제 (스택 이름을 입력해 확�
 | `login failed: … CERTIFICATE_VERIFY_FAILED` | 이 Python 에 CA 인증서가 없습니다. 설치 스크립트를 다시 실행하거나(macOS 키체인으로 대체) `SSL_CERT_FILE` 을 지정하세요. Homebrew: `brew postinstall ca-certificates` |
 | `login failed: … Address already in use` | 8723 포트를 다른 프로그램(대개 다른 `decider-guard login`)이 쓰고 있습니다. 닫고 다시 시도하세요 |
 | 배포가 "The maximum number of addresses has been reached" 로 실패 | NAT Gateway 용 Elastic IP 가 없습니다. 쿼터 증설을 요청하거나 `DEPLOY_ARGS="--network public"` |
-| 모든 프롬프트가 "guard 에 연결하지 못해 차단" 으로 막힘 | hook 이 guard Lambda 에 닿지 못하는 상태입니다. 네트워크와 AWS 자격 증명(`aws sts get-caller-identity`)을 확인하고 `make health`. 그동안 통과시키려면 `~/.decider-guard/config.json` 의 `fail_mode` 를 `open` 으로 |
+| 모든 프롬프트가 "guard 에 연결하지 못해 차단" 으로 막힘 | hook 이 guard 에 닿지 못하는 상태입니다. `decider-guard status` 로 로그인 상태와 모델 상태를 확인하세요. IAM 방식이면 `aws sts get-caller-identity` 도 확인하세요. 그동안 통과시키려면 `~/.decider-guard/config.json` 의 `fail_mode` 를 `open` 으로 |
 | 사유에 "모델에 연결할 수 없어 패턴으로만 검사" 가 나옴 | GPU 호스트가 꺼져 있거나(일정, Spot 중단, `make stop`) 이상이 있습니다. `make status`, `make start`. 로컬 모드는 `scripts/local-decider.sh start` |
 | `make deploy`: GPU 쿼터가 0 | Service Quotas → EC2 → *Running On-Demand G and VT instances* 에서 4 vCPU 이상 요청. 또는 쿼터가 있는 `--instance-type` 사용 |
 | `Cannot exceed quota for RolesPerAccount` | 계정이 IAM 역할 한도에 찼습니다. 스택은 역할 2개(콘솔 포함 3개), CDK bootstrap 은 최초 1회 5개를 만듭니다. 안 쓰는 역할 정리, 한도 증가 요청, 또는 `DEPLOY_ARGS=--no-console` |

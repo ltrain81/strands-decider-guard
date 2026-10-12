@@ -63,7 +63,7 @@ the admin pool, so a developer sign-in never opens the policy console.
    (`bash -c "$(curl -fsSL <console URL>/dev/install.sh)"`) downloads the hook from the console site, so they need no repository.
    Or give them the install command. `outputs.json` holds no secrets, so you can share it, or the values for the manual form:
    ```bash
-   client/install.sh --outputs outputs.json --auth jwt
+   client/install.sh --outputs outputs.json
    # or
    client/install.sh --api-url <GuardApiUrl> --client-id <DevClientId> \
      --authorize-url <DevAuthorizeUrl> --token-url <DevTokenUrl>       # external IdP: --issuer <DevIssuer>
@@ -76,7 +76,7 @@ The console's Logs tab shows the user in each row's details and CSV export, and 
 ## Developer: install and sign in
 
 ```bash
-client/install.sh --outputs outputs.json --auth jwt     # opens the browser to sign in, then runs a smoke test
+client/install.sh --outputs outputs.json     # opens the browser to sign in, then runs a smoke test
 decider-guard status                                    # guard health through the API
 decider-guard login                                     # when the session expires (default 30 days)
 decider-guard login --no-browser                        # over SSH: open the printed URL elsewhere, paste the address you land on
