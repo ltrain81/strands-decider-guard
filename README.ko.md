@@ -203,7 +203,7 @@ client/install.sh --outputs outputs.json --auth jwt   # 브라우저가 열림: 
 
 ## 정책 관리
 
-콘솔은 네 개의 탭으로 되어 있습니다.
+콘솔은 일곱 개의 탭으로 되어 있습니다.
 - **정책:**
   - 민감도 (관대 / 보통 / 엄격)
   - 정보 유형별 (주민번호, 신분증, 카드·계좌, 연락처, 건강정보, 비밀번호) 차단 / 확인 / 허용
@@ -214,7 +214,10 @@ client/install.sh --outputs outputs.json --auth jwt   # 브라우저가 열림: 
   - guard, GPU 호스트, 알림의 상태
   - 검사 수, 차단율, p95 지연, 오류
   - 시간대별 판정·지연 차트
-- **로그:** 검색할 수 있는 판정 로그(CSV 내보내기)와 누가 무엇을 바꿨는지 보여 주는 관리자 활동 기록. 원문은 저장하지 않습니다.
+- **로그:** 검색할 수 있는 판정 로그(CSV 내보내기, 로그인한 사람과 그룹 포함)와 누가 무엇을 바꿨는지 보여 주는 관리자 활동 기록.
+  *원문 보관*을 켜지 않으면 원문은 저장하지 않습니다.
+- **개발자:** 이메일로 초대하고, 초대 재발송·비활성화·삭제와 그룹을 관리합니다. 개발자에게 보낼 공개 설치 페이지
+  (`<콘솔 주소>/install.html`) 링크도 여기 있습니다 (AWS, 로그인 방식).
 - **알림:** 이메일 수신자와 "guard 다운", 오류, 차단 급증, 검사 지연 경보 (AWS)
 - **변경 이력:** 저장한 버전마다 기록이 남고, 지금 정책과 비교하고, 되돌릴 수 있습니다.
 
@@ -223,6 +226,10 @@ client/install.sh --outputs outputs.json --auth jwt   # 브라우저가 열림: 
 | 개요 | 회사 규칙 | 테스트 |
 |---|---|---|
 | ![개요](docs/images/console-overview-ko.png) | ![규칙](docs/images/console-policy-rules-ko.png) | ![테스트](docs/images/console-test-ko.png) |
+
+| 개발자 (초대, 로그인 계정, 그룹) | 개발자 설치 페이지 |
+|---|---|
+| ![개발자](docs/images/console-users-ko.png) | ![설치 페이지](docs/images/install-page-ko.png) |
 
 다른 화면은 [콘솔 가이드](docs/ADMIN.ko.md)에 있습니다.
 - 가이드: [docs/ADMIN.ko.md](docs/ADMIN.ko.md)
@@ -349,12 +356,14 @@ deploy.sh ctl.sh destroy.sh AWS 배포 / 운영 / 삭제
 scripts/                    doctor.sh, local-decider.sh, lib.sh (공용 함수)
 guard/guard_core.py         판정 엔진: 정규식 + decider + 정책. Lambda·콘솔·로컬 모드가 같은 코드를 씀
 guard/lambda_handler.py     guard Lambda 진입점 (S3 정책, 30초 캐시)
-client/                     decider_guard.py (세 에이전트 공용 hook), install.sh, configure_agents.py
-admin/                      정책 콘솔: web/index.html, api/handler.py, dev_server.py (로컬, 로그인 없음)
+client/                     decider_guard.py (세 에이전트 공용 hook. IAM, 로그인, 로컬), install.sh, configure_agents.py,
+                            bootstrap.sh (설치 페이지의 한 줄 명령)
+admin/                      정책 콘솔: web/index.html, web/install.html (개발자 설치 페이지),
+                            api/handler.py, api/users.py (개발자와 그룹), dev_server.py (로컬, 로그인 없음)
 litellm/                    LiteLLM 프록시 guardrail + 예시 설정
 cdk/                        CDK 앱 (TypeScript): VPC, GPU 호스트, Lambda, S3, CloudFront, Cognito, API
 demo/                       가짜 데이터 (en/, ko/), run_demo.sh, watch_audit.sh
-tests/                      test_offline.py (CI), test_with_model.py, eval_accuracy.py, 샘플
+tests/                      test_offline.py, test_signin.py, test_users.py (CI); test_with_model.py, eval_accuracy.py, 샘플
 docs/                       설정, 콘솔, LiteLLM, 데모 촬영 (영문 + .ko.md)
 ```
 

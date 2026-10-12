@@ -199,7 +199,7 @@ Options:
 
 ## Managing the policy
 
-The console has four tabs:
+The console has seven tabs:
 - **Policy:** sensitivity (lenient / balanced / strict) and block / ask / allow for each information type
   (resident ID, government ID, card/bank, contact, health, credentials).
   Also **your own rules written as yes/no questions**, e.g. "Does the text include unreleased launch plans for project
@@ -207,7 +207,10 @@ The console has four tabs:
 - **Test:** check sample text against unsaved settings.
 - **Overview:** health of the guard, the GPU host and alerts; checks, block rate, p95 latency and errors;
   charts of decisions and latency over time.
-- **Logs:** a searchable decision log with CSV export, and an admin activity trail of who changed what. No text is ever stored.
+- **Logs:** a searchable decision log with CSV export (with the signed-in person and their groups), and an admin activity trail
+  of who changed what. No text is stored unless you turn on *Keep original text*.
+- **Developers:** invite people by email, resend, disable or delete their sign-ins, and manage groups. It also has the link to
+  the public install page (`<console URL>/install.html`) to send developers (AWS, sign-in mode).
 - **Alerts:** email recipients and alarms for "guard down", errors, block spikes and slow checks (AWS).
 - **History:** every saved version, compare with the current one, and roll back.
 
@@ -216,6 +219,10 @@ Saved changes reach every hook and the LiteLLM guardrail within 30 seconds; noth
 | Overview | A custom rule | Test |
 |---|---|---|
 | ![Overview](docs/images/console-overview-en.png) | ![Rule](docs/images/console-policy-rules-en.png) | ![Test](docs/images/console-test-en.png) |
+
+| Developers (invitations, sign-ins, groups) | Developer install page |
+|---|---|
+| ![Developers](docs/images/console-users-en.png) | ![Install page](docs/images/install-page-en.png) |
 
 More screens in the [console guide](docs/ADMIN.md).
 Guide: [docs/ADMIN.md](docs/ADMIN.md). Local: `make local-console`. AWS: `make console`, plus `make add-admin ADMIN_EMAIL=…` to add logins.
@@ -339,12 +346,14 @@ deploy.sh ctl.sh destroy.sh AWS deploy / operate / delete
 scripts/                    doctor.sh, local-decider.sh, lib.sh (shared helpers)
 guard/guard_core.py         the engine: regex + decider + policy. Shared by the Lambda, console and local mode
 guard/lambda_handler.py     guard Lambda entry point (policy from S3, 30 s cache)
-client/                     decider_guard.py (one hook for all three agents), install.sh, configure_agents.py
-admin/                      policy console: web/index.html, api/handler.py, dev_server.py (local, no login)
+client/                     decider_guard.py (one hook for all three agents; IAM, sign-in or local), install.sh, configure_agents.py,
+                            bootstrap.sh (the install page's one-liner)
+admin/                      policy console: web/index.html, web/install.html (developer install page),
+                            api/handler.py, api/users.py (developers and groups), dev_server.py (local, no login)
 litellm/                    LiteLLM proxy guardrail + example config
 cdk/                        CDK app (TypeScript): VPC, GPU host, Lambdas, S3, CloudFront, Cognito, API
 demo/                       synthetic data (en/, ko/), run_demo.sh, watch_audit.sh
-tests/                      test_offline.py (CI), test_with_model.py, eval_accuracy.py, samples
+tests/                      test_offline.py, test_signin.py, test_users.py (CI); test_with_model.py, eval_accuracy.py, samples
 docs/                       configuration, console, LiteLLM, demo recording (English + .ko.md)
 ```
 
