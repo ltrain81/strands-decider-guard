@@ -212,7 +212,7 @@ with your device-management tool:
   `sudo DECIDER_GUARD_HOME=/opt/decider-guard client/install.sh --outputs outputs.json --agents none --no-login` does that
   without touching any user's agent config. Each person then runs `/opt/decider-guard/bin/decider-guard login` once; their
   token goes to their own `~/.decider-guard/token.json`, never the shared folder.
-- For model traffic users cannot route around, use the [LiteLLM guardrail](LITELLM.md) or Bedrock Guardrails.
+- For model traffic users cannot route around, use the [LiteLLM guardrail](LITELLM.md), or Bedrock Guardrails when the models are on Amazon Bedrock.
 
 ## IAM permissions
 

@@ -52,6 +52,8 @@ box("<b style='font-size:18px'>strands-decider-guard</b><br>PII and secrets are 
 inet = shape("", "internet_alt2", NET, 604, 0, 40, 30)
 box("<b>Internet</b> · PyPI, GitHub, Hugging Face, SSM", 650, 0, 320, 30, fill="none", stroke="none",
     extra="align=left;verticalAlign=middle;fontColor=#5A6C86;")
+model = box("<b>The agent's model API</b>, any provider<br>Anthropic API · OpenAI · Amazon Bedrock · …", 1390, 2, 330, 40,
+            fill="#E6F6F2", stroke="#01A88D", extra="fontSize=12;")
 
 # ---- developer side
 group("Developer machine", "group_corporate_data_center", "#7D8998", "#5A6C86", 20, 90, 330, 400)
@@ -82,7 +84,6 @@ gwe = shape("S3 gateway<br>endpoint", "endpoints", "#8C4FFF", 794, 474)
 
 logs = service("<b>CloudWatch</b><br>decision log, metrics, alarms", "cloudwatch_2", "#E7157B", 1290, 175)
 sns = service("<b>SNS</b><br>alert emails", "sns", "#E7157B", 1500, 175)
-bedrock = service("<b>Amazon Bedrock</b><br>models", "bedrock", "#01A88D", 1620, 175)
 s3 = box("<b>Amazon S3</b>", 1270, 340, 215, 230, fill="#F2F6E8", stroke="#7AA116",
          extra="verticalAlign=top;align=left;spacingLeft=8;spacingTop=4;")
 policy = service("<b>Policy bucket</b><br>versioned", "s3", "#7AA116", 1290, 380, label_at=LABEL_RIGHT)
@@ -102,7 +103,7 @@ edge(guard, ec2, "② one model call (private IP)", color=DEV, exit=(1, 0.5), en
 edge(guard, gwe, "③ policy, evidence", color=DEV, exit=(0.5, 1), entry=(0.5, 0))
 edge(gwe, s3, "", color=DEV, exit=(1, 0.5), entry=(0, 0.687))
 edge(guard, logs, "④ decision log (no text)", color=DEV, exit=(0.75, 1), entry=(0, 0.5), pts=[(834, 440), (1250, 440), (1250, 203)])
-edge(cc, bedrock, "⑤ only what passed goes to the model", color="#01A88D", exit=(0, 0.5), entry=(0.5, 0), pts=[(34, 189), (34, 52), (1648, 52)])
+edge(cc, model, "⑤ only what passed goes to the model (the hook checks first, on this machine)", color="#01A88D", exit=(0, 0.5), entry=(0, 0.5), pts=[(34, 189), (34, 52), (1360, 52), (1360, 22)])
 edge(ec2, nat, "first boot: packages, model · SSM", color=NET, dashed=1, exit=(0.5, 0), entry=(1, 0.5), pts=[(1085, 150), (680, 150), (680, 224)])
 edge(nat, inet, "", color=NET, dashed=1, exit=(0.5, 0), entry=(0.5, 1))
 edge(logs, sns, "alarms", color=ADM, dashed=1, exit=(1, 0.5), entry=(0, 0.5))

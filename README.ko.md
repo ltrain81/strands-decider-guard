@@ -56,7 +56,8 @@ UserPromptSubmit operation blocked by hook:
 2. guard 는 정규식을 먼저 보고, GPU 호스트의 strands-decider 를 private IP 로 **한 번** 호출합니다.
 3. S3 게이트웨이 엔드포인트로 읽은 현재 정책을 적용합니다 (30초 캐시).
 4. 판정, 유형, 크기만 로그로 남기고 원문은 남기지 않습니다.
-5. 통과한 것만 모델로 갑니다.
+5. 통과한 것만 모델로 갑니다. 검사는 요청이 나가기 전에 개발자 PC 에서 이뤄지므로, 에이전트가 쓰는 모델이
+   Anthropic API 든 OpenAI 든 Amazon Bedrock 이든 똑같이 동작합니다.
 
 GPU 호스트는 공인 IP 없이 프라이빗 서브넷에 있습니다. 첫 부팅 때 패키지 설치·모델 다운로드와 SSM 통신만 NAT Gateway 를 거쳐 인터넷으로 나갑니다.
 guard Lambda 는 인터넷 경로가 전혀 없는 격리 서브넷에서 실행됩니다.
@@ -314,7 +315,7 @@ make destroy                   # 전체 삭제 (스택 이름을 입력해 확�
 - **클라이언트 hook 은 강제 수단이 아닙니다.** 사용자가 지울 수 있습니다. 강제하려면:
   - Claude Code 관리형 설정 (`managed-settings.json` + `allowManagedHooksOnly`)으로 배포하세요.
   - [LiteLLM guardrail](docs/LITELLM.ko.md)을 모델 앞에 두세요.
-  - 또는 서버 측 백스톱으로 Bedrock Guardrails 를 쓰세요:
+  - 또는 에이전트가 Amazon Bedrock 으로 모델을 호출한다면, 서버 측 백스톱으로 Bedrock Guardrails 를 쓰세요:
     `ANTHROPIC_CUSTOM_HEADERS="X-Amzn-Bedrock-GuardrailIdentifier: <id>\nX-Amzn-Bedrock-GuardrailVersion: 1"`
 - **hook 이 놓치는 부분:**
   - Kiro CLI 는 프롬프트를 막을 수 없습니다.

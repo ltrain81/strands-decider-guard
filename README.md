@@ -51,7 +51,8 @@ More detail: [Configuration reference](docs/CONFIGURATION.md) · [Policy console
 2. The guard runs the regexes, then makes **one** call to strands-decider on the GPU host over a private IP.
 3. It applies the current policy, read from S3 through a gateway endpoint and cached for 30 s.
 4. It logs only the decision, types and sizes, never the text.
-5. Only what passed reaches the model.
+5. Only what passed reaches the model. The check runs on the developer's machine before the request leaves, so it works
+   the same whichever model the agent uses: the Anthropic API, OpenAI, Amazon Bedrock or anything else.
 
 The GPU host sits in a private subnet with no public IP. It reaches the internet only through a NAT Gateway, to install packages and
 download the model on first boot and to talk to SSM. The guard Lambda runs in isolated subnets with no internet route at all.
@@ -303,7 +304,7 @@ questions only, which is closest to what developers feel.
 - **Client hooks are not enforcement.** A user can remove them. For enforcement:
   - Ship them via Claude Code managed settings (`managed-settings.json` + `allowManagedHooksOnly`).
   - Put the [LiteLLM guardrail](docs/LITELLM.md) in front of the models.
-  - Or use Bedrock Guardrails as a server-side backstop:
+  - Or, when the agents call models through Amazon Bedrock, use Bedrock Guardrails as a server-side backstop:
     `ANTHROPIC_CUSTOM_HEADERS="X-Amzn-Bedrock-GuardrailIdentifier: <id>\nX-Amzn-Bedrock-GuardrailVersion: 1"`.
 - **Gaps in the hooks:**
   - Kiro CLI cannot block prompts.

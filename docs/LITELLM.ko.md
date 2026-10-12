@@ -10,7 +10,7 @@ Claude Code ──/v1/messages──┐
 Codex CLI ───/v1/responses──┼─▶ LiteLLM proxy ──pre_call──▶ decider guard (Lambda 또는 decider 직접) ──▶ 차단 시 HTTP 400
 SDK / 앱 ──/chat/completions┘        │ 통과
                                      ▼
-                              Amazon Bedrock
+                              Amazon Bedrock (또는 다른 제공자)
 ```
 
 | | 클라이언트 hook | LiteLLM guardrail |
