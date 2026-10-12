@@ -163,6 +163,12 @@ The console has four tabs:
 - **History:** every saved version, compare with the current one, and roll back.
 
 Saved changes reach every hook and the LiteLLM guardrail within 30 seconds; nothing is redeployed.
+
+| Overview | A custom rule | Test |
+|---|---|---|
+| ![Overview](docs/images/console-overview-en.png) | ![Rule](docs/images/console-policy-rules-en.png) | ![Test](docs/images/console-test-en.png) |
+
+More screens in the [console guide](docs/ADMIN.md).
 Guide: [docs/ADMIN.md](docs/ADMIN.md). Local: `make local-console`. AWS: `make console`, plus `make add-admin ADMIN_EMAIL=…` to add logins.
 
 The console UI and block messages are available in English and Korean. They follow the browser and system

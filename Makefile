@@ -15,7 +15,7 @@ install_args = --agents $(AGENTS) $(if $(LANGUAGE),--language $(LANGUAGE)) $(INS
 
 .DEFAULT_GOAL := help
 .PHONY: help doctor local local-console local-stop preflight deploy install status health stop start console \
-        add-admin uninstall demo test test-model eval destroy
+        add-admin uninstall demo test test-model eval screenshots destroy
 
 help: ## list targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -74,6 +74,10 @@ test: ## offline tests (no model, no AWS) + script syntax
 
 test-model: ## policy feature tests against a running decider (make local first)
 	@python3 -I tests/test_with_model.py
+
+screenshots: ## re-capture console screenshots for the docs (needs a running local decider and Chrome)
+	@python3 -I docs/screenshots/serve_demo.py --port 8790 > /tmp/decider-console-demo.log 2>&1 & echo $$! > /tmp/decider-console-demo.pid; sleep 2
+	@node docs/screenshots/capture.mjs; kill $$(cat /tmp/decider-console-demo.pid)
 
 eval: ## accuracy on the synthetic samples (needs a running decider)
 	@python3 -I tests/eval_accuracy.py && python3 -I tests/eval_accuracy.py --holdout

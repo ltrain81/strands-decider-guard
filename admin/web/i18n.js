@@ -67,7 +67,7 @@ const I18N = {
     r_model: '<b>{label}</b> (model: sensitive {s}%, specific person {n}%)',
 
     // logs
-    logs_title: 'Decision log', logs_sub: 'Every check the guard made. Text is never stored: you see the decision, tool, target and type.',
+    logs_title: 'Decision log', logs_sub: 'Every check the guard made: decision, tool, target, type and who decided. Text is kept only when "Keep original text" is on (📄).',
     f_decision_all: 'All decisions', f_tool_all: 'All tools', f_cat_all: 'All types', f_search_ph: 'Search the target (file name, prompt, bash…)',
     search: 'Search', export: 'Export CSV', loading: 'Loading…', rows_shown: '{n} entries', truncated: 'Showing the newest {n}. Narrow the filters to see older ones.',
     col_time: 'Time', col_decision: 'Decision', col_tool: 'Tool', col_target: 'Target', col_reason: 'Reason', col_chars: 'Chars', request_id: 'Request ID',
@@ -163,7 +163,7 @@ const I18N = {
     r_rule: '회사 규칙 <b>{name}</b>에 해당 (모델 확신도 {p}%)', r_regex: '<b>{label}</b> 형식 발견: <code>{sample}</code>',
     r_model: '<b>{label}</b> (AI 판단: 민감 정보 {s}%, 특정인 {n}%)',
 
-    logs_title: '판정 로그', logs_sub: 'guard 가 한 모든 검사입니다. 원문은 저장하지 않으며, 판정·도구·대상·유형만 보입니다.',
+    logs_title: '판정 로그', logs_sub: 'guard 가 한 모든 검사입니다. 판정·도구·대상·유형·판정 근거가 보입니다. 원문은 "원문 보관"을 켰을 때만 저장됩니다(📄).',
     f_decision_all: '모든 판정', f_tool_all: '모든 도구', f_cat_all: '모든 유형', f_search_ph: '대상 검색 (파일 이름, prompt, bash…)',
     search: '검색', export: 'CSV 내보내기', loading: '불러오는 중…', rows_shown: '{n}건', truncated: '최근 {n}건만 보입니다. 필터를 좁히면 더 오래된 기록을 볼 수 있습니다.',
     col_time: '시각', col_decision: '판정', col_tool: '도구', col_target: '대상', col_reason: '사유', col_chars: '글자 수', request_id: '요청 ID',

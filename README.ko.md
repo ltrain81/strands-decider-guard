@@ -174,6 +174,12 @@ client/install.sh --outputs outputs.json [--profile 팀원-프로필] [--agents 
 - **변경 이력:** 저장한 버전마다 기록이 남고, 지금 정책과 비교하고, 되돌릴 수 있습니다.
 
 저장하면 30초 안에 모든 hook 과 LiteLLM guardrail 에 적용되며, 재배포는 필요 없습니다.
+
+| 개요 | 회사 규칙 | 테스트 |
+|---|---|---|
+| ![개요](docs/images/console-overview-ko.png) | ![규칙](docs/images/console-policy-rules-ko.png) | ![테스트](docs/images/console-test-ko.png) |
+
+다른 화면은 [콘솔 가이드](docs/ADMIN.ko.md)에 있습니다.
 - 가이드: [docs/ADMIN.ko.md](docs/ADMIN.ko.md)
 - 로컬: `make local-console`
 - AWS: `make console`. 로그인 추가는 `make add-admin ADMIN_EMAIL=…`

@@ -18,6 +18,8 @@ The console lets anyone, developer or not, decide what the guard blocks. Saved c
 
 ## Overview tab
 
+![Overview tab](images/console-overview-en.png)
+
 The first screen: is the guard working, and what is it doing?
 
 - **Health:** the guard (can it reach the model, which model and device), the GPU host (running or stopped),
@@ -32,6 +34,8 @@ The first screen: is the guard working, and what is it doing?
 ## Policy tab
 
 ### Sensitivity
+
+![Sensitivity and pattern checks](images/console-policy-sensitivity-en.png)
 
 | Choice | When | Benchmark (held-out half): recall · false positives · on developer text |
 |---|---|---|
@@ -50,6 +54,8 @@ Every decision records who made it. The Overview tab charts it, and the Logs tab
 
 ### Actions by information type
 
+![Actions by information type](images/console-policy-types-en.png)
+
 Pick **Block**, **Ask** or **Allow** for each type:
 - **Block:** the agent cannot read, write or send it to the model.
 - **Ask:** Claude Code asks the user "continue?". Kiro, Codex and LiteLLM cannot ask, so they block.
@@ -63,6 +69,8 @@ regexes cannot find them.
 so change the two together.
 
 ### Your own rules
+
+![Custom rule written as a yes/no question](images/console-policy-rules-en.png)
 
 Write what you want to stop as a **question that can be answered yes or no**. There are no regexes or keyword
 lists: the model answers your question on every check.
@@ -96,6 +104,8 @@ Shown to developers when something is blocked. A good place for your support cha
 
 ### Keep original text
 
+![Block message and original-text setting](images/console-policy-evidence-en.png)
+
 Off by default. When on, the checked text is stored so you can open it from a row in the Logs tab ("Show original text"):
 - **Blocked and asked only**, or **Everything**.
 - The text is encrypted, deleted after 30 days and readable only by console admins. Every view appears in Admin activity.
@@ -107,12 +117,18 @@ When "You have unsaved changes" appears at the bottom, click **Save and apply**.
 
 ## Test tab
 
+![Test tab: a blocked support note, decided by the model alone](images/console-test-en.png)
+
 - Paste text and click **Check**. It uses the **current, unsaved** settings.
 - The result is Blocked, Needs confirmation or Allowed, with the reasons, e.g.
   "Health / medical (model: sensitive 97%, specific person 65%)".
 - Tested text is not logged and does not count in Activity.
 
 ## Logs tab
+
+![Decision log with the original text opened](images/console-logs-en.png)
+
+![Admin activity](images/console-activity-en.png)
 
 - **Decision log:** every check the guard made.
   - Filter by period, decision, tool, information type (or custom rule) and target. The target is a file name, `prompt`, `bash` and so on.
@@ -124,6 +140,8 @@ When "You have unsaved changes" appears at the bottom, click **Save and apply**.
 - On AWS this reads CloudWatch Logs, which can take a few seconds for long periods.
 
 ## Alerts tab
+
+![Alerts tab](images/console-alerts-en.png)
 
 AWS only. Alerts email people when the guard needs attention.
 
@@ -143,6 +161,8 @@ AWS only. Alerts email people when the guard needs attention.
 - A stopped GPU host (`make stop`) triggers *Guard down*. Turn that rule off first if you stop the host on purpose.
 
 ## History tab
+
+![History with a version compared to the current policy](images/console-history-en.png)
 
 - Every save is a version, with who saved it and when.
 - **Compare** shows what loading that version would change.
