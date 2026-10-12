@@ -27,6 +27,8 @@ UserPromptSubmit operation blocked by hook:
 - [경로 고르기](#경로-고르기)
 - [빠른 시작: 로컬 (AWS 없이)](#빠른-시작-로컬-aws-없이)
 - [빠른 시작: 팀용 AWS 배포](#빠른-시작-팀용-aws-배포)
+  - [관리자](#관리자-한-번-aws-접근-필요)
+  - [개발자](#개발자-각-pc)
 - [에이전트별 검사 범위](#에이전트별-검사-범위)
 - [정책 관리](#정책-관리)
 - [운영과 비용](#운영과-비용)
@@ -85,7 +87,7 @@ AWS 아이콘이 들어 있는 [draw.io](https://app.diagrams.net) 에서 열어
 | 하고 싶은 것 | 경로 | 필요한 것 | 시간 |
 |---|---|---|---|
 | 내 노트북에서 동작 확인 | [로컬](#빠른-시작-로컬-aws-없이) | Python 3.10+ (uv 권장). Apple 실리콘 Mac이나 NVIDIA GPU면 가장 빠름 | 약 10분 (첫 모델 다운로드 약 4GB) |
-| 팀의 에이전트 보호 | [AWS](#빠른-시작-팀용-aws-배포) | AWS 자격 증명, Node 18+, AWS CLI v2, GPU 인스턴스 쿼터 | 약 25분 |
+| 팀의 에이전트 보호 | [AWS](#빠른-시작-팀용-aws-배포) | 관리자: AWS 자격 증명, Node 18+, AWS CLI v2, GPU 쿼터. 개발자: python3 와 로그인 계정 | 약 25분, 개발자당 약 2분 |
 | LiteLLM 프록시에서 강제 (사용자가 끌 수 없음) | [LiteLLM](docs/LITELLM.ko.md) | 위 둘 중 하나 | +10분 |
 | 비개발자가 규칙 관리 | [정책 콘솔](docs/ADMIN.ko.md) | 위 둘 중 하나로 배포 (로컬은 로그인 없음) | — |
 
@@ -124,33 +126,63 @@ cd demo/ko && claude
 
 ## 빠른 시작: 팀용 AWS 배포
 
+역할은 둘입니다. **관리자**가 한 번 배포하고 접근을 관리하며, 각 **개발자**는 자기 PC 에 hook 을 설치합니다.
+개발자에게는 AWS 접근이 필요 없습니다.
+
+### 관리자 (한 번, AWS 접근 필요)
+
+1. 점검한 뒤 배포합니다:
+   ```bash
+   git clone https://github.com/ltrain81/strands-decider-guard && cd strands-decider-guard
+   make preflight REGION=ap-northeast-2                          # 읽기 전용: 도구, 자격 증명, GPU 쿼터, IAM 역할, Elastic IP
+   make deploy    REGION=ap-northeast-2 ADMIN_EMAIL=<내 메일>     # 스택 약 6분 + 첫 모델 로딩 약 10분
+   ```
+   - 배포가 만드는 것: strands-decider 가 도는 GPU 호스트(기본 `g6.xlarge`), 같은 VPC 의 guard Lambda,
+     정책과 (선택) 원문을 저장하는 버전 관리 S3 버킷, 정책 콘솔(CloudFront, Cognito, HTTP API), 개발자 로그인 API.
+   - GPU 호스트는 NAT Gateway 뒤 프라이빗 서브넷에 있고, NAT 에는 빈 Elastic IP 가 하나 필요합니다. preflight 가 없다고 하면
+     쿼터 증설을 요청하거나 `DEPLOY_ARGS="--network public"` 으로 배포하세요 (퍼블릭 서브넷, NAT 없음).
+   - 마지막에 스모크 테스트를 하고 콘솔 주소를 출력합니다. Cognito 가 임시 비밀번호를 메일로 보냅니다.
+     콘솔 관리자 추가는 `make add-admin ADMIN_EMAIL=…`.
+2. 개발자 hook 의 인증 방식을 정합니다:
+
+   | | 로그인 (`--auth jwt`, 권장) | IAM |
+   |---|---|---|
+   | 개발자에게 필요한 것 | 로그인 계정: `make add-dev DEV_EMAIL=…` (Cognito 가 임시 비밀번호 발송), 또는 회사 IdP ([docs/SIGN_IN.ko.md](docs/SIGN_IN.ko.md)) | **`InvokePolicyArn`** 관리형 정책이 붙은 AWS 자격 증명 (guard 에 대한 `lambda:InvokeFunction` 만) |
+   | 요청한 사람 기록 | 검증된 토큰에서 기록 | 기록 안 됨 |
+   | 세션 | 30일, 이후 `decider-guard login` | AWS 자격 증명이 유효한 동안 |
+
+3. 개발자에게 `outputs.json` (비밀 정보 없음: 이름, ARN, URL)과 [개발자 설치 순서](#개발자-각-pc)를 전달합니다.
+   로그인 방식이면 계정을 먼저 만들어 두세요.
+4. 운영:
+   - `make console` 로 정책 콘솔을 엽니다: 정책, 테스트, 로그(사용자 포함), 알림. [콘솔 가이드](docs/ADMIN.ko.md) 참고.
+   - `make status`, `make stop` / `make start` (GPU 호스트가 주요 비용입니다. [운영과 비용](#운영과-비용) 참고).
+   - 개발자 접근 회수: 로그인 계정을 비활성화합니다 (`aws cognito-idp admin-disable-user`, 또는 IdP 에서).
+5. 관리자 PC 도 보호하세요: `make add-dev DEV_EMAIL=<내 메일>` 후 `make install AUTH=jwt` (IAM 방식은 `make install`).
+
+### 개발자 (각 PC)
+
+필요한 것: git, python3, Claude Code 또는 Codex, 관리자에게 받은 `outputs.json`, 임시 비밀번호가 담긴 메일.
+저장소를 clone 할 수 없으면 관리자가 압축 파일로 전달해도 됩니다. 설치에는 `client/` 와 `guard/guard_core.py` 만 쓰입니다.
+
 ```bash
-make preflight REGION=ap-northeast-2                                   # 읽기 전용: 자격 증명, GPU 쿼터, IAM 여유
-make deploy    REGION=ap-northeast-2 ADMIN_EMAIL=you@example.com       # 스택 약 6분 + 첫 모델 로딩 약 10분
-make install                                                           # 이 PC 에 hook 설치 (outputs.json 사용)
+git clone https://github.com/ltrain81/strands-decider-guard && cd strands-decider-guard
+cp ~/Downloads/outputs.json .                         # 관리자에게 받은 파일
+client/install.sh --outputs outputs.json --auth jwt   # 브라우저가 열림: 로그인, 첫 로그인 때 새 비밀번호 설정
 ```
 
-배포가 만드는 것:
-- strands-decider 가 도는 GPU 호스트 (기본 `g6.xlarge`)
-- 같은 VPC 안의 guard Lambda
-- 정책을 저장하는 버전 관리 S3 버킷
-- 정책 콘솔 (CloudFront, Cognito 로그인, HTTP API)
+1. 설치 스크립트가 로그인하고, `~/.claude/settings.json` 과 `~/.codex/hooks.json` 에 hook 을 추가한 뒤
+   (다른 hook 은 유지, 각 파일은 `*.bak-decider-guard` 로 백업) 스모크 테스트를 합니다. `PII prompt -> blocked (ok)` 가 나오면 정상입니다.
+2. 실행 중인 Claude Code / Codex 세션을 재시작합니다. **Codex** 는 `/hooks` 로 한 번 승인해야 새 hook 이 동작합니다.
+3. 상태 확인은 언제든 `decider-guard status`. `~/.decider-guard/bin/` 에 있고, `~/.local/bin` 이 있으면 거기에도 링크됩니다.
+4. 30일이 지나거나 관리자가 접근을 회수하면 프롬프트가 "로그인하세요: decider-guard login" 으로 막힙니다. 그 명령을 실행하세요.
+   SSH 환경에서는 `decider-guard login --no-browser` 로 하고, 브라우저가 도착한 주소를 붙여 넣습니다.
+5. 제거는 `client/install.sh --uninstall`.
 
-마지막에 스모크 테스트를 하고 콘솔 주소를 출력합니다. 관리자에게는 Cognito 가 임시 비밀번호를 메일로 보냅니다.
-
-팀원 PC 에서는 hook 의 인증 방식을 고릅니다:
-
-```bash
-git clone … && cd strands-decider-guard
-client/install.sh --outputs outputs.json --auth jwt [--agents claude,codex,kiro]   # 브라우저 로그인, AWS 자격 증명 불필요
-client/install.sh --outputs outputs.json [--profile 팀원-프로필]                   # 또는: 팀원의 AWS 자격 증명 (IAM)
-```
-
-- `outputs.json` 을 팀원에게 공유하세요. 비밀 정보 없이 이름, ARN, URL 만 들어 있습니다.
-- **로그인 (`--auth jwt`, 개발자에게 AWS 접근이 없을 때 권장):** `make add-dev DEV_EMAIL=…` 로 계정을 만들거나 회사 IdP 와 연동합니다.
-  판정 로그에 사용자가 남습니다. 동작 원리: [docs/SIGN_IN.ko.md](docs/SIGN_IN.ko.md).
-- **IAM 방식:** 팀원의 IAM 에는 출력값의 **`InvokePolicyArn`** 관리형 정책을 붙여야 합니다. guard 에 대한 `lambda:InvokeFunction` 하나만 허용합니다.
-- Claude Code 를 Amazon Bedrock 으로 쓰도록 같이 설정하려면 `--claude-bedrock --bedrock-region us-west-2` 를 붙입니다.
+옵션:
+- `--agents claude,codex,kiro`: Kiro 추가 (선택).
+- `--language ko`: 메시지를 한국어로.
+- `--claude-bedrock --bedrock-region us-west-2`: Claude Code 를 Amazon Bedrock 으로 연결.
+- 로그인 대신 IAM 방식: `--auth jwt` 를 빼고 `--profile <프로필>` 을 붙입니다.
 
 ## 에이전트별 검사 범위
 
@@ -288,6 +320,10 @@ make destroy                   # 전체 삭제 (스택 이름을 입력해 확�
 
 | 증상 | 해결 |
 |---|---|
+| "PII guard 에 로그인하지 않았거나 세션이 만료되었습니다" | `decider-guard login` 을 실행하세요. 계속 반복되면 관리자가 계정을 비활성화했을 수 있습니다 |
+| `login failed: … CERTIFICATE_VERIFY_FAILED` | 이 Python 에 CA 인증서가 없습니다. 설치 스크립트를 다시 실행하거나(macOS 키체인으로 대체) `SSL_CERT_FILE` 을 지정하세요. Homebrew: `brew postinstall ca-certificates` |
+| `login failed: … Address already in use` | 8723 포트를 다른 프로그램(대개 다른 `decider-guard login`)이 쓰고 있습니다. 닫고 다시 시도하세요 |
+| 배포가 "The maximum number of addresses has been reached" 로 실패 | NAT Gateway 용 Elastic IP 가 없습니다. 쿼터 증설을 요청하거나 `DEPLOY_ARGS="--network public"` |
 | 모든 프롬프트가 "guard 에 연결하지 못해 차단" 으로 막힘 | hook 이 guard Lambda 에 닿지 못하는 상태입니다. 네트워크와 AWS 자격 증명(`aws sts get-caller-identity`)을 확인하고 `make health`. 그동안 통과시키려면 `~/.decider-guard/config.json` 의 `fail_mode` 를 `open` 으로 |
 | 사유에 "모델에 연결할 수 없어 패턴으로만 검사" 가 나옴 | GPU 호스트가 꺼져 있거나(일정, Spot 중단, `make stop`) 이상이 있습니다. `make status`, `make start`. 로컬 모드는 `scripts/local-decider.sh start` |
 | `make deploy`: GPU 쿼터가 0 | Service Quotas → EC2 → *Running On-Demand G and VT instances* 에서 4 vCPU 이상 요청. 또는 쿼터가 있는 `--instance-type` 사용 |

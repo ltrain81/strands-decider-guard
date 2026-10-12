@@ -25,6 +25,8 @@ UserPromptSubmit operation blocked by hook:
 - [Choose your path](#choose-your-path)
 - [Quick start: local, no AWS](#quick-start-local-no-aws)
 - [Quick start: AWS for a team](#quick-start-aws-for-a-team)
+  - [Admin](#admin-once-with-aws-access)
+  - [Developer](#developer-each-machine)
 - [What is checked in each agent](#what-is-checked-in-each-agent)
 - [Managing the policy](#managing-the-policy)
 - [Operations and cost](#operations-and-cost)
@@ -80,7 +82,7 @@ Reasons always show **masked** values, and nothing logs the original text.
 | You want to… | Path | Needs | Time |
 |---|---|---|---|
 | See it work on your laptop | [Local](#quick-start-local-no-aws) | Python 3.10+ (uv recommended); a Mac with Apple silicon or an NVIDIA GPU is fastest | ~10 min (first model download ~4 GB) |
-| Protect a team's agents | [AWS](#quick-start-aws-for-a-team) | AWS credentials, Node 18+, AWS CLI v2, GPU instance quota | ~25 min |
+| Protect a team's agents | [AWS](#quick-start-aws-for-a-team) | admin: AWS credentials, Node 18+, AWS CLI v2, GPU quota. Developers: python3 and a sign-in | ~25 min, then ~2 min per developer |
 | Enforce it in a LiteLLM proxy (cannot be bypassed by the user) | [LiteLLM](docs/LITELLM.md) | either of the above | +10 min |
 | Let non-developers manage the rules | [Policy console](docs/ADMIN.md) | deployed with either path (local: no login) | — |
 
@@ -119,30 +121,64 @@ cd demo/en && claude
 
 ## Quick start: AWS for a team
 
+Two roles: an **admin** deploys once and manages access; each **developer** installs the hook on their own machine
+and needs no AWS access.
+
+### Admin (once, with AWS access)
+
+1. Check, then deploy:
+   ```bash
+   git clone https://github.com/ltrain81/strands-decider-guard && cd strands-decider-guard
+   make preflight REGION=ap-northeast-2                          # read-only: tools, credentials, GPU quota, IAM roles, Elastic IP
+   make deploy    REGION=ap-northeast-2 ADMIN_EMAIL=<your email> # ~6 min stack + ~10 min first model load
+   ```
+   - The deploy creates a GPU host (default `g6.xlarge`) running strands-decider, a guard Lambda in the same VPC,
+     versioned S3 buckets for the policy and (opt-in) original text, the policy console (CloudFront, Cognito, HTTP API)
+     and the developer sign-in API.
+   - The GPU host sits in a private subnet behind a NAT Gateway, which needs one free Elastic IP. If preflight reports none,
+     request a quota increase or deploy with `DEPLOY_ARGS="--network public"` (host in a public subnet, no NAT).
+   - It ends with a smoke test and prints the console URL. Cognito emails you a temporary password.
+     Add more console admins with `make add-admin ADMIN_EMAIL=…`.
+2. Choose how developers' hooks authenticate:
+
+   | | Sign-in (`--auth jwt`, recommended) | IAM |
+   |---|---|---|
+   | Developers need | a sign-in: `make add-dev DEV_EMAIL=…` (Cognito emails a temporary password), or your company IdP ([docs/SIGN_IN.md](docs/SIGN_IN.md)) | AWS credentials with the **`InvokePolicyArn`** managed policy (`lambda:InvokeFunction` on the guard only) |
+   | Who made each request | logged, from the verified token | not logged |
+   | Session | 30 days, then `decider-guard login` | as long as their AWS credentials |
+
+3. Give each developer `outputs.json` (no secrets: names, ARNs and URLs) and the [developer steps](#developer-each-machine).
+   For sign-in, create their logins first.
+4. Day to day:
+   - `make console` opens the policy console: policy, test, logs (with the user), alerts. See the [console guide](docs/ADMIN.md).
+   - `make status`, `make stop` / `make start` (the GPU host is the main cost; see [Operations and cost](#operations-and-cost)).
+   - Revoke a developer: disable their sign-in (`aws cognito-idp admin-disable-user`, or in your IdP).
+5. Protect your own machine too: `make add-dev DEV_EMAIL=<your email>` then `make install AUTH=jwt` (or `make install` for IAM).
+
+### Developer (each machine)
+
+You need git, python3, Claude Code and/or Codex, the `outputs.json` from your admin, and the email with your temporary password.
+If you cannot clone the repository, your admin can send it as an archive: the installer only uses `client/` and `guard/guard_core.py`.
+
 ```bash
-make preflight REGION=us-east-1                                   # read-only: credentials, GPU quota, IAM headroom
-make deploy    REGION=us-east-1 ADMIN_EMAIL=you@example.com       # ~6 min stack + ~10 min first model load
-make install                                                      # hooks on this machine, using outputs.json
+git clone https://github.com/ltrain81/strands-decider-guard && cd strands-decider-guard
+cp ~/Downloads/outputs.json .                         # from your admin
+client/install.sh --outputs outputs.json --auth jwt   # opens the browser: sign in, set a new password on first sign-in
 ```
 
-The deploy creates a GPU host (default `g6.xlarge`) running strands-decider, a guard Lambda in the same VPC,
-a versioned S3 bucket for the policy, and the policy console (CloudFront, Cognito login, HTTP API).
-It ends with a smoke test and prints the console URL. Cognito emails the admin a temporary password.
+1. The installer signs you in, adds the hooks to `~/.claude/settings.json` and `~/.codex/hooks.json` (other hooks are kept,
+   each file is backed up as `*.bak-decider-guard`), then runs a smoke test. Expect `PII prompt -> blocked (ok)`.
+2. Restart running Claude Code / Codex sessions. **Codex** runs new hooks only after you approve them once with `/hooks`.
+3. Check any time with `decider-guard status`. It lives in `~/.decider-guard/bin/`, linked into `~/.local/bin` if that exists.
+4. After 30 days, or if your admin revokes access, prompts are blocked with "Sign in with: decider-guard login". Run it.
+   Over SSH, use `decider-guard login --no-browser` and paste the address the browser lands on.
+5. Remove everything with `client/install.sh --uninstall`.
 
-On each teammate's machine, pick how the hook authenticates:
-
-```bash
-git clone … && cd strands-decider-guard
-client/install.sh --outputs outputs.json --auth jwt [--agents claude,codex,kiro]   # browser sign-in, no AWS credentials
-client/install.sh --outputs outputs.json [--profile their-profile]                 # or: their AWS credentials (IAM)
-```
-
-- Share `outputs.json` with teammates. It holds no secrets, only names, ARNs and URLs.
-- **Sign-in (`--auth jwt`, recommended when developers have no AWS access):** create each sign-in with `make add-dev DEV_EMAIL=…`,
-  or federate with your company IdP. Every decision is logged with the user. How it works: [docs/SIGN_IN.md](docs/SIGN_IN.md).
-- **IAM:** teammates' IAM identities need the **`InvokePolicyArn`** managed policy from the outputs, which grants
-  `lambda:InvokeFunction` on the guard and nothing else.
-- To point Claude Code at Amazon Bedrock at the same time, add `--claude-bedrock --bedrock-region us-west-2`.
+Options:
+- `--agents claude,codex,kiro` adds Kiro (opt-in).
+- `--language ko` switches the messages to Korean.
+- `--claude-bedrock --bedrock-region us-west-2` also points Claude Code at Amazon Bedrock.
+- IAM instead of sign-in: drop `--auth jwt` and add `--profile <profile>`.
 
 ## What is checked in each agent
 
@@ -274,6 +310,10 @@ questions only, which is closest to what developers feel.
 
 | Symptom | Fix |
 |---|---|
+| "Not signed in to the PII guard, or the session expired" | Run `decider-guard login`. If it keeps happening, your admin may have disabled your sign-in |
+| `login failed: … CERTIFICATE_VERIFY_FAILED` | This Python has no CA certificates. Re-run the installer (the hook falls back to the macOS keychain), or set `SSL_CERT_FILE`. Homebrew: `brew postinstall ca-certificates` |
+| `login failed: … Address already in use` | Port 8723 is taken, usually by another `decider-guard login`. Close it and retry |
+| Deploy fails with "The maximum number of addresses has been reached" | No free Elastic IP for the NAT Gateway: request a quota increase, or `DEPLOY_ARGS="--network public"` |
 | Every prompt is blocked with "Could not reach the guard" | The hook cannot reach the guard Lambda: check network and AWS credentials (`aws sts get-caller-identity`), then `make health`. To allow while it is down, set `fail_mode: open` in `~/.decider-guard/config.json` |
 | Reasons say "model unavailable: checked with patterns only" | The GPU host is stopped (schedule, Spot interruption, `make stop`) or unhealthy: `make status`, `make start`. Local mode: `scripts/local-decider.sh start` |
 | `make deploy`: GPU quota is 0 | Service Quotas → EC2 → *Running On-Demand G and VT instances*: request at least 4 vCPUs. Or use `--instance-type` with a type you have quota for |
