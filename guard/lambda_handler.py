@@ -113,10 +113,11 @@ def handler(event, context):
     if "http" in (event.get("requestContext") or {}):
         return api_handler(event, context)
     if event.get("health"):
+        # "ok" is the model's health (the guard-down alarm watches it); "guard" says this Lambda answered at all.
         try:
-            return {"ok": True, "decider": guard_core.health()}
+            return {"ok": True, "guard": "ok", "decider": guard_core.health(timeout=3)}
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "guard": "ok", "model": "unavailable", "fallback": "patterns", "error": str(e)[:200]}
     user = str(event.get("user") or "")[:200]
     return check(event, context, user, "caller" if user else "")
 

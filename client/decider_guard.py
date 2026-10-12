@@ -3,7 +3,7 @@
 
   decider_guard.py claude|kiro|codex   hook mode: reads the hook event JSON on stdin
   decider_guard.py check "some text"   manual check, prints the verdict
-  decider_guard.py status              backend health
+  decider_guard.py status [--json]     guard and model health
   decider_guard.py login [--no-browser]   sign in (backend "api"); logout removes the saved token
 
 Config: ~/.decider-guard/config.json (written by install.sh). The audit log
@@ -54,6 +54,11 @@ MSG = {
         "login_done": "Signed in as {user}. The session lasts until {until} unless revoked.",
         "login_page": "Sign-in received. Return to the terminal to see whether it finished; you can close this tab.",
         "logout_done": "Signed out (token removed).",
+        "st_guard": "PII guard: reachable ({how})", "st_signed_in": "signed in as {user}", "st_iam": "AWS credentials",
+        "st_local": "local mode, {url}",
+        "st_model_ok": "Model: ready ({model} on {device})",
+        "st_model_down": "Model: not available right now (GPU host stopped, starting, or outside its schedule).\n"
+                         "  Checks still run with patterns only: certain formats block, emails and phone numbers ask.",
     },
     "ko": {
         "blocked": "[PII guard] 민감 정보가 감지되어 차단했습니다 ({where}).",
@@ -76,6 +81,11 @@ MSG = {
         "login_done": "{user} 로 로그인했습니다. 세션은 {until} 까지 유지됩니다.",
         "login_page": "로그인 정보를 받았습니다. 완료 여부는 터미널에서 확인하세요. 이 탭은 닫아도 됩니다.",
         "logout_done": "로그아웃했습니다 (토큰 삭제).",
+        "st_guard": "PII guard: 연결됨 ({how})", "st_signed_in": "{user} 로 로그인", "st_iam": "AWS 자격 증명",
+        "st_local": "로컬 모드, {url}",
+        "st_model_ok": "모델: 사용 가능 ({model}, {device})",
+        "st_model_down": "모델: 지금은 쓸 수 없습니다 (GPU 호스트가 꺼져 있거나, 켜지는 중이거나, 운영 시간 밖).\n"
+                         "  검사는 계속 패턴으로만 합니다: 형식이 확실한 값은 차단, 이메일·전화번호는 확인.",
     },
 }
 
@@ -539,6 +549,43 @@ def run_hook(agent):
     return emit(cfg, agent, event, decision, block_message(cfg, decision, reasons, where, verdict.get("message", ""), unreachable, signed_out), reasons)
 
 
+def status(cfg, as_json=False):
+    """Guard and model health in plain words. A stopped model host is normal (schedule, Spot): checks fall back to patterns."""
+    if cfg["backend"] == "local":
+        sys.path.insert(0, HOME)
+        import guard_core
+        try:
+            out = {"ok": True, "decider": guard_core.health(cfg["decider_url"], timeout=3)}
+        except Exception as e:
+            out = {"ok": False, "error": str(e)[:200]}
+        how = m(cfg, "st_local", url=cfg["decider_url"])
+    elif cfg["backend"] == "api":
+        try:
+            out = call_api(cfg, {"health": True})
+        except NotSignedIn:
+            print(m(cfg, "login_needed") + "\n" + m(cfg, "login_hint"))
+            return 1
+        with open(TOKEN_FILE) as f:
+            c = _claims(json.load(f)["id_token"])
+        how = m(cfg, "st_signed_in", user=c.get("email") or c.get("sub"))
+    else:
+        try:
+            import boto3
+            sess = boto3.Session(profile_name=cfg["profile"] or None, region_name=cfg["region"] or None)
+            resp = sess.client("lambda").invoke(FunctionName=cfg["function_name"], Payload=b'{"health": true}')
+            out = json.load(resp["Payload"])
+        except ImportError:
+            out = _invoke_with_cli(cfg, {"health": True})
+        how = m(cfg, "st_iam")
+    if as_json:
+        print(json.dumps(out, indent=2))
+        return 0
+    print(m(cfg, "st_guard", how=how))
+    d = out.get("decider") or {}
+    print(m(cfg, "st_model_ok", model=d.get("model", "?"), device=d.get("device", "?")) if out.get("ok") else m(cfg, "st_model_down"))
+    return 0
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
@@ -570,24 +617,7 @@ def main():
             pass
         print(m(cfg, "logout_done"))
     elif cmd == "status":
-        if cfg["backend"] == "api":
-            try:
-                print(json.dumps(call_api(cfg, {"health": True}), indent=2))
-            except NotSignedIn:
-                sys.exit(m(cfg, "login_needed") + "\n" + m(cfg, "login_hint"))
-        elif cfg["backend"] == "local":
-            sys.path.insert(0, HOME)
-            import guard_core
-            print(json.dumps(guard_core.health(cfg["decider_url"]), indent=2))
-        else:
-            try:
-                import boto3
-                sess = boto3.Session(profile_name=cfg["profile"] or None, region_name=cfg["region"] or None)
-                resp = sess.client("lambda").invoke(FunctionName=cfg["function_name"], Payload=b'{"health": true}')
-                out = json.load(resp["Payload"])
-            except ImportError:
-                out = _invoke_with_cli(cfg, {"health": True})
-            print(json.dumps(out, indent=2))
+        sys.exit(status(cfg, as_json="--json" in sys.argv[2:]))
     else:
         sys.exit(__doc__)
 

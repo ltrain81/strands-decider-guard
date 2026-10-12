@@ -31,7 +31,7 @@ const TEXT = {
     s1_h: 'Run the installer', s1: 'In a terminal:', s1_opts: 'Options go after <code>--</code>, for example <code>-- --agents claude,codex,kiro --language ko</code>.',
     s2_h: 'Sign in', s2: 'A browser opens. Sign in with your email and the temporary password, then choose your own password. The terminal then shows <code>Signed in as …</code> and a smoke test: <code>PII prompt -> blocked (ok)</code>.',
     s3_h: 'Restart your agents', s3: 'Restart running Claude Code and Codex sessions. In Codex, approve the new hooks once with <code>/hooks</code>.',
-    s4_h: 'Check', s4: 'Any time:',
+    s4_h: 'Check', s4: 'Any time:', s4_note: 'If it says the model is not available, the GPU host is stopped (for example outside working hours). Nothing is wrong: checks continue with patterns only until it is back.',
     daily_h: 'Day to day',
     daily: ['If a prompt is blocked, the message says which kind of data was found. Mask it or leave it out.', 'Your sign-in lasts 30 days. After that the guard asks you to run <code>decider-guard login</code>.', 'Over SSH (no browser on that machine): <code>decider-guard login --no-browser</code>, open the printed link on your laptop and paste back the address you land on.', 'Remove the guard:'],
     safer_h: 'Prefer to read the script first?', safer: 'Download, inspect, then run it:',
@@ -53,7 +53,7 @@ const TEXT = {
     s1_h: '설치 스크립트 실행', s1: '터미널에서:', s1_opts: '옵션은 <code>--</code> 뒤에 붙입니다. 예: <code>-- --agents claude,codex,kiro --language ko</code>.',
     s2_h: '로그인', s2: '브라우저가 열리면 이메일과 임시 비밀번호로 로그인하고 새 비밀번호를 정합니다. 그러면 터미널에 <code>… 로 로그인했습니다</code> 와 스모크 테스트 결과 <code>PII prompt -> blocked (ok)</code> 가 나옵니다.',
     s3_h: '에이전트 재시작', s3: '실행 중인 Claude Code, Codex 세션을 재시작하세요. Codex 는 <code>/hooks</code> 로 새 hook 을 한 번 승인해야 합니다.',
-    s4_h: '확인', s4: '언제든:',
+    s4_h: '확인', s4: '언제든:', s4_note: '"모델: 지금은 쓸 수 없습니다" 가 나오면 GPU 호스트가 꺼져 있는 것입니다 (예: 운영 시간 밖). 문제는 아니고, 다시 켜질 때까지 패턴으로만 검사합니다.',
     daily_h: '평소 사용',
     daily: ['프롬프트가 막히면 메시지에 어떤 종류의 정보가 발견됐는지 나옵니다. 마스킹하거나 빼고 다시 보내세요.', '로그인은 30일 동안 유지됩니다. 그 뒤에는 <code>decider-guard login</code> 을 실행하라는 안내가 나옵니다.', 'SSH 환경(브라우저 없음): <code>decider-guard login --no-browser</code> 를 실행하고, 출력된 링크를 노트북에서 연 뒤 도착한 주소를 붙여 넣으세요.', '제거:'],
     safer_h: '스크립트를 먼저 읽어 보고 싶다면', safer: '내려받아 확인한 뒤 실행하세요:',
@@ -86,7 +86,7 @@ function render() {
       <li><h3>${t.s1_h}</h3>${t.s1}${cmd(one)}<p class="hint">${t.s1_opts}</p></li>
       <li><h3>${t.s2_h}</h3>${t.s2}</li>
       <li><h3>${t.s3_h}</h3>${t.s3}</li>
-      <li><h3>${t.s4_h}</h3>${t.s4}${cmd('decider-guard status')}</li>
+      <li><h3>${t.s4_h}</h3>${t.s4}${cmd('decider-guard status')}<p class="hint">${t.s4_note}</p></li>
     </ol></div>
     <div class="card"><h2>${t.daily_h}</h2><ul>${t.daily.map(x => `<li>${x}</li>`).join('')}</ul>${cmd(one + ' -- --uninstall')}</div>
     <div class="card"><h2>${t.safer_h}</h2><p>${t.safer}</p>${cmd(`curl -fsSL ${cfg.base}/dev/install.sh -o decider-guard-install.sh\nless decider-guard-install.sh\nbash decider-guard-install.sh`)}
